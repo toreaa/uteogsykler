@@ -2,7 +2,7 @@
 
 # Core dependencies
 streamlit>=1.28.0
-supabase==2.3.4
+supabase-py==2.8.0
 
 # Database and data handling  
 pandas>=2.0.0
