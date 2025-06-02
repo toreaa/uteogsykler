@@ -5,7 +5,13 @@ Supabase client setup og connection handling
 import os
 import sys
 from typing import Optional
-from supabase import create_client, Client
+
+try:
+    from supabase import create_client, Client
+except ImportError:
+    # Fallback for different supabase package versions
+    from supabase.client import create_client, Client
+
 import streamlit as st
 
 # Legg til src-mappen til Python path
