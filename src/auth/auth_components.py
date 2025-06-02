@@ -4,9 +4,20 @@ Streamlit components for authentication UI
 
 import streamlit as st
 from typing import Optional, Tuple, Dict, Any
-from .auth_manager import get_auth_manager
-from ..utils.error_handler import StreamlitErrorHandler, format_error_for_user
-from ..utils.database_helpers import get_db_helper
+import sys
+import os
+
+# Add src to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.error_handler import StreamlitErrorHandler, format_error_for_user
+from utils.database_helpers import get_db_helper
+
+
+def get_auth_manager():
+    """Import auth manager here to avoid circular imports"""
+    from auth.auth_manager import get_auth_manager as _get_auth_manager
+    return _get_auth_manager()
 
 
 def render_login_form() -> Optional[Dict[str, Any]]:
