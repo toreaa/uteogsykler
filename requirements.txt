@@ -2,3 +2,4 @@ streamlit
 supabase
 pandas
 python-dateutil
+gotrue>=2.0.0
