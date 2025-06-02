@@ -8,7 +8,7 @@ from datetime import datetime, date
 from typing import Dict, List, Optional, Any, Union
 from dateutil.relativedelta import relativedelta
 
-from supabase_client import get_supabase
+from .supabase_client import get_supabase
 
 
 class DatabaseError(Exception):
