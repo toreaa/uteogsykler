@@ -22,8 +22,23 @@ st.set_page_config(
 )
 
 def test_database_connection():
-    """Test database connection"""
+    """Test database connection with detailed debugging"""
     with StreamlitErrorHandler(context="Database Connection Test"):
+        
+        # First, let's see what we actually have
+        from config import config
+        
+        st.write("**Debug Info:**")
+        st.write(f"URL length: {len(config.supabase_url) if config.supabase_url else 0}")
+        st.write(f"URL starts with https: {config.supabase_url.startswith('https://') if config.supabase_url else False}")
+        st.write(f"Key length: {len(config.supabase_anon_key) if config.supabase_anon_key else 0}")
+        st.write(f"Key starts correctly: {config.supabase_anon_key.startswith('eyJ') if config.supabase_anon_key else False}")
+        
+        # Show first/last few chars of key for verification
+        if config.supabase_anon_key:
+            key = config.supabase_anon_key
+            st.write(f"Key preview: {key[:10]}...{key[-10:]}")
+        
         client = get_supabase_client()
         success = client.test_connection()
         return success
