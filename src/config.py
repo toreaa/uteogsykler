@@ -16,7 +16,8 @@ class Config:
         # App konfigurasjon
         self.app_name = self._get_secret("APP_NAME", "app", "name", "Konkurranseapp")
         self.app_version = self._get_secret("APP_VERSION", "app", "version", "1.0.0")
-        self.debug_mode = self._get_secret("DEBUG_MODE", "app", "debug_mode", "false").lower() == "true"
+        debug_value = self._get_secret("DEBUG_MODE", "app", "debug_mode", "false")
+        self.debug_mode = str(debug_value).lower() == "true"
         self.secret_key = self._get_secret("SECRET_KEY", "app", "secret_key", "streamlit-cloud-secret")
     
     def _get_secret(self, env_name: str, streamlit_section: str = None, streamlit_key: str = None, default: str = None) -> str:
