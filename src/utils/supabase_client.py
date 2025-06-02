@@ -6,11 +6,8 @@ import os
 import sys
 from typing import Optional
 
-try:
-    from supabase import create_client, Client
-except ImportError:
-    # Fallback for different supabase package versions
-    from supabase.client import create_client, Client
+# Correct Supabase import for version 2.x
+from supabase import create_client, Client
 
 import streamlit as st
 
