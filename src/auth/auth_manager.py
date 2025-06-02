@@ -1,318 +1,315 @@
 """
-Authentication manager for Konkurranseapp using Supabase Auth
+Streamlit components for authentication UI
 """
 
 import streamlit as st
-from typing import Optional, Dict, Any
-from ..utils.supabase_client import get_supabase
-from ..utils.database_helpers import get_db_helper, DatabaseError
-from ..utils.error_handler import (
-    AuthenticationError, ValidationError, StreamlitErrorHandler,
-    validate_email, validate_required_fields, format_error_for_user
-)
+from typing import Optional, Tuple, Dict, Any
+import sys
+import os
+
+# Add src to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from auth.auth_manager import get_auth_manager
+from utils.error_handler import StreamlitErrorHandler, format_error_for_user
+from utils.database_helpers import get_db_helper
 
 
-class AuthManager:
-    """Handles authentication and user session management"""
+def render_login_form() -> Optional[Dict[str, Any]]:
+    """
+    Render login form
     
-    def __init__(self):
-        self.supabase = get_supabase()
-        self.db = get_db_helper()
+    Returns:
+        User data if login successful, None otherwise
+    """
+    st.subheader("🔐 Logg inn")
     
-    def initialize_session(self):
-        """Initialize session state for authentication"""
-        if 'authenticated' not in st.session_state:
-            st.session_state.authenticated = False
+    with st.form("login_form"):
+        email = st.text_input("E-post", placeholder="din@epost.no")
+        password = st.text_input("Passord", type="password")
         
-        if 'user' not in st.session_state:
-            st.session_state.user = None
+        col1, col2 = st.columns([1, 1])
         
-        if 'company' not in st.session_state:
-            st.session_state.company = None
+        with col1:
+            submitted = st.form_submit_button("Logg inn", type="primary", use_container_width=True)
+        
+        with col2:
+            forgot_password = st.form_submit_button("Glemt passord?", use_container_width=True)
     
-    def sign_up(self, email: str, password: str, full_name: str, company_code: str = None) -> Dict[str, Any]:
-        """
-        Register new user with email/password
+    # Handle login
+    if submitted:
+        if not email or not password:
+            st.error("Vennligst fyll inn både e-post og passord")
+            return None
         
-        Args:
-            email: User email
-            password: User password
-            full_name: User's full name
-            company_code: Optional company code for joining existing company
+        with StreamlitErrorHandler(context="User Login"):
+            auth = get_auth_manager()
+            user_data = auth.sign_in(email, password)
             
-        Returns:
-            Dict with user information
-            
-        Raises:
-            ValidationError: If input validation fails
-            AuthenticationError: If signup fails
-        """
-        # Validate input
-        validate_required_fields({
-            'email': email,
-            'password': password,
-            'full_name': full_name
-        }, ['email', 'password', 'full_name'])
-        
-        if not validate_email(email):
-            raise ValidationError("Ugyldig e-postadresse", field="email")
-        
-        if len(password) < 6:
-            raise ValidationError("Passord må være minst 6 tegn", field="password")
-        
-        if len(full_name.strip()) < 2:
-            raise ValidationError("Fullt navn må være minst 2 tegn", field="full_name")
-        
-        try:
-            # Sign up with Supabase Auth
-            response = self.supabase.auth.sign_up({
-                "email": email,
-                "password": password,
-                "options": {
-                    "data": {
-                        "full_name": full_name,
-                        "company_code": company_code
-                    }
-                }
-            })
-            
-            if response.user:
-                # User created successfully
-                user_data = {
-                    'id': response.user.id,
-                    'email': response.user.email,
-                    'full_name': full_name,
-                    'company_code': company_code,
-                    'email_confirmed': response.user.email_confirmed_at is not None
-                }
-                
+            if user_data:
+                auth.update_session(user_data)
+                st.success(f"Velkommen tilbake, {user_data['full_name']}!")
+                st.rerun()
                 return user_data
-            else:
-                raise AuthenticationError("Kunne ikke opprette bruker")
-                
-        except Exception as e:
-            if "already registered" in str(e).lower():
-                raise ValidationError("E-post er allerede registrert", field="email")
-            else:
-                raise AuthenticationError(f"Registrering feilet: {e}")
     
-    def sign_in(self, email: str, password: str) -> Dict[str, Any]:
-        """
-        Sign in user with email/password
-        
-        Args:
-            email: User email
-            password: User password
-            
-        Returns:
-            Dict with user information
-            
-        Raises:
-            ValidationError: If input validation fails
-            AuthenticationError: If signin fails
-        """
-        # Validate input
-        validate_required_fields({
-            'email': email,
-            'password': password
-        }, ['email', 'password'])
-        
-        if not validate_email(email):
-            raise ValidationError("Ugyldig e-postadresse", field="email")
-        
-        try:
-            # Sign in with Supabase Auth
-            response = self.supabase.auth.sign_in_with_password({
-                "email": email,
-                "password": password
-            })
-            
-            if response.user:
-                # Get additional user data from our database
-                user_profile = self.db.get_user_by_id(response.user.id)
-                
-                if user_profile:
-                    # User exists in our database
-                    user_data = {
-                        'id': response.user.id,
-                        'email': response.user.email,
-                        'full_name': user_profile['full_name'],
-                        'company_id': user_profile['company_id'],
-                        'is_admin': user_profile['is_admin'],
-                        'company': user_profile.get('companies', {}),
-                        'email_confirmed': response.user.email_confirmed_at is not None
-                    }
-                    
-                    return user_data
-                else:
-                    # User exists in Auth but not in our database (incomplete registration)
-                    raise AuthenticationError("Brukerregistrering ikke fullført. Kontakt support.")
-            else:
-                raise AuthenticationError("Ugyldig e-post eller passord")
-                
-        except Exception as e:
-            if "invalid" in str(e).lower() or "wrong" in str(e).lower():
-                raise AuthenticationError("Ugyldig e-post eller passord")
-            else:
-                raise AuthenticationError(f"Pålogging feilet: {e}")
+    # Handle forgot password
+    if forgot_password:
+        if not email:
+            st.error("Vennligst fyll inn e-post først")
+        else:
+            with StreamlitErrorHandler(context="Password Reset"):
+                auth = get_auth_manager()
+                auth.reset_password(email)
+                st.success("Tilbakestillingslenke sendt til e-post!")
     
-    def sign_out(self):
-        """Sign out current user"""
-        try:
-            self.supabase.auth.sign_out()
-            
-            # Clear session state
-            st.session_state.authenticated = False
-            st.session_state.user = None
-            st.session_state.company = None
-            
-        except Exception as e:
-            # Log error but don't fail - user should be signed out locally anyway
-            print(f"Warning: Sign out error: {e}")
-            
-            # Force local sign out
-            st.session_state.authenticated = False
-            st.session_state.user = None
-            st.session_state.company = None
+    return None
+
+
+def render_signup_form() -> Optional[Dict[str, Any]]:
+    """
+    Render signup form
     
-    def get_current_user(self) -> Optional[Dict[str, Any]]:
-        """Get current authenticated user"""
-        try:
-            user = self.supabase.auth.get_user()
-            
-            if user and user.user:
-                # Get fresh user data from database
-                user_profile = self.db.get_user_by_id(user.user.id)
-                
-                if user_profile:
-                    return {
-                        'id': user.user.id,
-                        'email': user.user.email,
-                        'full_name': user_profile['full_name'],
-                        'company_id': user_profile['company_id'],
-                        'is_admin': user_profile['is_admin'],
-                        'company': user_profile.get('companies', {}),
-                        'email_confirmed': user.user.email_confirmed_at is not None
-                    }
-            
+    Returns:
+        User data if signup successful, None otherwise
+    """
+    st.subheader("📝 Opprett ny konto")
+    
+    with st.form("signup_form"):
+        full_name = st.text_input("Fullt navn", placeholder="Ola Nordmann")
+        email = st.text_input("E-post", placeholder="din@epost.no")
+        password = st.text_input("Passord", type="password", help="Minst 6 tegn")
+        password_confirm = st.text_input("Bekreft passord", type="password")
+        
+        st.markdown("---")
+        
+        # Company selection
+        registration_type = st.radio(
+            "Jeg vil:",
+            ["Registrere min bedrift (bli admin)", "Bli med i eksisterende bedrift"],
+            help="Velg hvordan du vil registrere deg"
+        )
+        
+        company_code = None
+        if registration_type == "Bli med i eksisterende bedrift":
+            company_code = st.text_input(
+                "Bedriftskode", 
+                placeholder="AB12C3",
+                help="6-tegns kode du har fått fra din bedrift",
+                max_chars=6
+            ).upper()
+        
+        submitted = st.form_submit_button("Opprett konto", type="primary", use_container_width=True)
+    
+    if submitted:
+        # Validation
+        if not all([full_name, email, password, password_confirm]):
+            st.error("Vennligst fyll inn alle feltene")
             return None
-            
-        except Exception as e:
-            print(f"Error getting current user: {e}")
+        
+        if password != password_confirm:
+            st.error("Passordene stemmer ikke overens")
             return None
-    
-    def is_authenticated(self) -> bool:
-        """Check if user is authenticated"""
-        return st.session_state.get('authenticated', False)
-    
-    def is_admin(self) -> bool:
-        """Check if current user is admin"""
-        user = st.session_state.get('user')
-        return user and user.get('is_admin', False)
-    
-    def require_auth(self, admin_required: bool = False):
-        """
-        Decorator/function to require authentication
         
-        Args:
-            admin_required: If True, require admin privileges
-        """
-        if not self.is_authenticated():
-            st.error("Du må logge inn for å få tilgang til denne siden")
-            st.stop()
+        if registration_type == "Bli med i eksisterende bedrift" and not company_code:
+            st.error("Vennligst skriv inn bedriftskode")
+            return None
         
-        if admin_required and not self.is_admin():
-            st.error("Du har ikke tilgang til denne funksjonen (kun admin)")
-            st.stop()
-    
-    def update_session(self, user_data: Dict[str, Any]):
-        """Update session state with user data"""
-        st.session_state.authenticated = True
-        st.session_state.user = user_data
+        # Validate company code if provided
+        if company_code:
+            db = get_db_helper()
+            company = db.get_company_by_code(company_code)
+            if not company:
+                st.error("Ugyldig bedriftskode")
+                return None
         
-        if user_data.get('company'):
-            st.session_state.company = user_data['company']
-    
-    def reset_password(self, email: str):
-        """
-        Send password reset email
-        
-        Args:
-            email: User email address
-        """
-        if not validate_email(email):
-            raise ValidationError("Ugyldig e-postadresse", field="email")
-        
-        try:
-            self.supabase.auth.reset_password_email(email)
-            return True
+        with StreamlitErrorHandler(context="User Registration"):
+            auth = get_auth_manager()
             
-        except Exception as e:
-            raise AuthenticationError(f"Kunne ikke sende tilbakestilling: {e}")
-    
-    def complete_user_registration(self, user_id: str, full_name: str, 
-                                 company_id: str = None, is_admin: bool = False) -> Dict[str, Any]:
-        """
-        Complete user registration by creating user profile in database
-        
-        Args:
-            user_id: Supabase Auth user ID
-            full_name: User's full name
-            company_id: Company ID (optional)
-            is_admin: Whether user is admin
-            
-        Returns:
-            User profile data
-        """
-        try:
-            # Get user email from Auth
-            auth_user = self.supabase.auth.get_user()
-            if not auth_user or not auth_user.user or auth_user.user.id != user_id:
-                raise AuthenticationError("Ugyldig bruker-session")
-            
-            # Create user profile in our database
-            user_profile = self.db.create_user(
-                user_id=user_id,
-                email=auth_user.user.email,
+            # Sign up user
+            user_data = auth.sign_up(
+                email=email,
+                password=password,
                 full_name=full_name,
-                company_id=company_id,
-                is_admin=is_admin
+                company_code=company_code
             )
             
-            return user_profile
+            if user_data:
+                if user_data.get('email_confirmed'):
+                    st.success("Konto opprettet! Du kan nå logge inn.")
+                    return user_data
+                else:
+                    st.success("Konto opprettet! Sjekk e-post for å bekrefte kontoen din.")
+                    st.info("Du må bekrefte e-posten din før du kan logge inn.")
+    
+    return None
+
+
+def render_logout_button():
+    """Render logout button"""
+    if st.button("🚪 Logg ut", key="logout_btn"):
+        auth = get_auth_manager()
+        auth.sign_out()
+        st.success("Du er nå logget ut")
+        st.rerun()
+
+
+def render_user_info(user: Dict[str, Any]):
+    """
+    Render current user information
+    
+    Args:
+        user: User data dictionary
+    """
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("👤 Brukerinfo")
+        
+        st.write(f"**Navn:** {user['full_name']}")
+        st.write(f"**E-post:** {user['email']}")
+        
+        if user.get('company'):
+            company = user['company']
+            st.write(f"**Bedrift:** {company.get('name', 'Ikke tilknyttet')}")
             
-        except DatabaseError as e:
-            raise AuthenticationError(f"Kunne ikke fullføre registrering: {e}")
+            if user.get('is_admin'):
+                st.write("**Rolle:** 👑 Admin")
+            else:
+                st.write("**Rolle:** 👤 Bruker")
+        else:
+            st.write("**Bedrift:** Ikke tilknyttet")
+        
+        st.markdown("---")
+        render_logout_button()
 
 
-# Global auth manager instance
-_auth_manager = None
-
-def get_auth_manager() -> AuthManager:
-    """Get global auth manager instance"""
-    global _auth_manager
+def render_auth_tabs() -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """
+    Render authentication tabs (login/signup)
     
-    if _auth_manager is None:
-        _auth_manager = AuthManager()
+    Returns:
+        Tuple of (authentication_successful, user_data)
+    """
+    tab1, tab2 = st.tabs(["Logg inn", "Opprett konto"])
     
-    return _auth_manager
+    user_data = None
+    
+    with tab1:
+        user_data = render_login_form()
+    
+    with tab2:
+        signup_data = render_signup_form()
+        if signup_data and signup_data.get('email_confirmed'):
+            user_data = signup_data
+    
+    return user_data is not None, user_data
 
-def require_auth(admin_required: bool = False):
-    """Convenience function for requiring authentication"""
-    auth = get_auth_manager()
-    auth.require_auth(admin_required)
 
-def get_current_user() -> Optional[Dict[str, Any]]:
-    """Convenience function for getting current user"""
-    auth = get_auth_manager()
-    return auth.get_current_user()
+def render_company_selection() -> Optional[str]:
+    """
+    Render company selection/creation for new users
+    
+    Returns:
+        Company ID if selected/created, None otherwise
+    """
+    st.subheader("🏢 Bedriftstilknytning")
+    
+    choice = st.radio(
+        "Hva vil du gjøre?",
+        [
+            "Registrere min bedrift (bli admin)", 
+            "Bli med i eksisterende bedrift"
+        ]
+    )
+    
+    if choice == "Registrere min bedrift (bli admin)":
+        return render_company_creation_form()
+    else:
+        return render_company_join_form()
 
-def is_authenticated() -> bool:
-    """Convenience function for checking authentication"""
-    auth = get_auth_manager()
-    return auth.is_authenticated()
 
-def is_admin() -> bool:
-    """Convenience function for checking admin status"""
+def render_company_creation_form() -> Optional[str]:
+    """
+    Render company creation form
+    
+    Returns:
+        Company ID if created, None otherwise
+    """
+    st.write("**Opprett ny bedrift**")
+    
+    with st.form("create_company_form"):
+        company_name = st.text_input(
+            "Bedriftsnavn", 
+            placeholder="Acme AS",
+            help="Navnet på bedriften din"
+        )
+        
+        submitted = st.form_submit_button("Opprett bedrift", type="primary")
+    
+    if submitted:
+        if not company_name:
+            st.error("Vennligst skriv inn bedriftsnavn")
+            return None
+        
+        with StreamlitErrorHandler(context="Company Creation"):
+            db = get_db_helper()
+            company = db.create_company(company_name)
+            
+            if company:
+                st.success(f"Bedrift '{company_name}' opprettet!")
+                st.info(f"**Bedriftskode:** `{company['company_code']}`")
+                st.info("Del denne koden med dine ansatte så de kan registrere seg")
+                return company['id']
+    
+    return None
+
+
+def render_company_join_form() -> Optional[str]:
+    """
+    Render company join form
+    
+    Returns:
+        Company ID if valid code, None otherwise
+    """
+    st.write("**Bli med i eksisterende bedrift**")
+    
+    with st.form("join_company_form"):
+        company_code = st.text_input(
+            "Bedriftskode", 
+            placeholder="AB12C3",
+            help="6-tegns kode du har fått fra din bedrift",
+            max_chars=6
+        ).upper()
+        
+        submitted = st.form_submit_button("Valider kode", type="primary")
+    
+    if submitted:
+        if not company_code:
+            st.error("Vennligst skriv inn bedriftskode")
+            return None
+        
+        with StreamlitErrorHandler(context="Company Code Validation"):
+            db = get_db_helper()
+            company = db.get_company_by_code(company_code)
+            
+            if company:
+                st.success(f"Gyldig kode! Du blir med i: **{company['name']}**")
+                return company['id']
+            else:
+                st.error("Ugyldig bedriftskode")
+    
+    return None
+
+
+def check_authentication_status():
+    """
+    Check and initialize authentication status
+    Should be called at the start of every page
+    """
     auth = get_auth_manager()
-    return auth.is_admin()
+    auth.initialize_session()
+    
+    # Try to get current user from Supabase
+    if not auth.is_authenticated():
+        current_user = auth.get_current_user()
+        if current_user:
+            auth.update_session(current_user)
