@@ -1,72 +1,68 @@
 """
 Sentralisert konfigurasjonshåndtering for Konkurranseapp
-Håndterer både lokale miljøvariabler og Streamlit Cloud secrets
+Cloud-native versjon for Streamlit Cloud deployment
 """
 
 import os
-from dotenv import load_dotenv
 
 class Config:
-    """Konfigurasjonsklass som håndterer miljøvariabler og secrets"""
+    """Konfigurasjonsklass som håndterer Streamlit Cloud secrets"""
     
     def __init__(self):
-        # Last .env fil for lokal utvikling
-        load_dotenv()
-        
-        # Supabase konfigurasjon
-        self.supabase_url = self._get_env_var("SUPABASE_URL")
-        self.supabase_anon_key = self._get_env_var("SUPABASE_ANON_KEY")
+        # Supabase konfigurasjon fra Streamlit secrets
+        self.supabase_url = self._get_secret("SUPABASE_URL", "supabase", "url")
+        self.supabase_anon_key = self._get_secret("SUPABASE_ANON_KEY", "supabase", "anon_key")
         
         # App konfigurasjon
-        self.app_name = self._get_env_var("APP_NAME", default="Konkurranseapp")
-        self.app_version = self._get_env_var("APP_VERSION", default="1.0.0")
-        self.debug_mode = self._get_env_var("DEBUG_MODE", default="false").lower() == "true"
-        self.secret_key = self._get_env_var("SECRET_KEY", default="dev-secret-key-change-in-prod")
-        
-        # Streamlit konfigurasjon
-        self.streamlit_port = int(self._get_env_var("STREAMLIT_SERVER_PORT", default="8501"))
-        self.streamlit_address = self._get_env_var("STREAMLIT_SERVER_ADDRESS", default="localhost")
+        self.app_name = self._get_secret("APP_NAME", "app", "name", "Konkurranseapp")
+        self.app_version = self._get_secret("APP_VERSION", "app", "version", "1.0.0")
+        self.debug_mode = self._get_secret("DEBUG_MODE", "app", "debug_mode", "false").lower() == "true"
+        self.secret_key = self._get_secret("SECRET_KEY", "app", "secret_key", "streamlit-cloud-secret")
     
-    def _get_env_var(self, var_name: str, default: str = None) -> str:
+    def _get_secret(self, env_name: str, streamlit_section: str = None, streamlit_key: str = None, default: str = None) -> str:
         """
-        Hent miljøvariabel med fallback til default
+        Hent secret fra Streamlit Cloud secrets med fallback til miljøvariabler
         
         Args:
-            var_name: Navn på miljøvariabel
-            default: Default verdi hvis variabel ikke finnes
+            env_name: Navn på miljøvariabel (fallback)
+            streamlit_section: Streamlit secrets section
+            streamlit_key: Streamlit secrets key
+            default: Default verdi hvis secret ikke finnes
             
         Returns:
-            Verdien av miljøvariabelen
+            Verdien av secret
             
         Raises:
-            ValueError: Hvis påkrevd variabel mangler
+            ValueError: Hvis påkrevd secret mangler
         """
-        value = os.getenv(var_name, default)
+        value = None
+        
+        # Prøv Streamlit secrets først (primary method for cloud)
+        if streamlit_section and streamlit_key:
+            try:
+                import streamlit as st
+                value = st.secrets[streamlit_section][streamlit_key]
+            except (KeyError, AttributeError, ImportError):
+                pass
+        
+        # Fallback til miljøvariabel (for GitHub Actions eller andre cloud services)
+        if value is None:
+            value = os.getenv(env_name, default)
         
         if value is None:
-            raise ValueError(f"Påkrevd miljøvariabel mangler: {var_name}")
+            raise ValueError(f"Påkrevd secret mangler: {env_name} (eller {streamlit_section}.{streamlit_key})")
         
         return value
     
     def get_streamlit_secrets(self):
         """
-        Hent secrets for Streamlit Cloud deployment
-        Denne metoden vil bli utvidet når vi integrerer med Streamlit
+        Hent alle secrets for Streamlit Cloud deployment
         """
-        try:
-            import streamlit as st
-            return {
-                'supabase_url': st.secrets["supabase"]["url"],
-                'supabase_anon_key': st.secrets["supabase"]["anon_key"],
-                'secret_key': st.secrets["app"]["secret_key"]
-            }
-        except (ImportError, KeyError):
-            # Fallback til miljøvariabler hvis Streamlit secrets ikke er tilgjengelig
-            return {
-                'supabase_url': self.supabase_url,
-                'supabase_anon_key': self.supabase_anon_key,
-                'secret_key': self.secret_key
-            }
+        return {
+            'supabase_url': self.supabase_url,
+            'supabase_anon_key': self.supabase_anon_key,
+            'secret_key': self.secret_key
+        }
     
     def validate_config(self) -> bool:
         """
