@@ -286,4 +286,148 @@ def show_competition_management(user):
                 
                 with col1:
                     st.write(f"**Status:** {'Pågående' if is_current else 'Fullført'}")
-                    st.write(f"**
+                    st.write(f"**Deltakere:** {len(leaderboard)}")
+                
+                with col2:
+                    total_points = sum(entry['total_points'] for entry in leaderboard)
+                    st.write(f"**Totale poeng:** {total_points}")
+                    
+                    avg_points = total_points / len(leaderboard) if leaderboard else 0
+                    st.write(f"**Snitt poeng:** {avg_points:.1f}")
+                
+                with col3:
+                    if leaderboard:
+                        winner = leaderboard[0]
+                        st.write(f"**🏆 Vinner:** {winner['full_name']}")
+                        st.write(f"**Poeng:** {winner['total_points']}")
+                    else:
+                        st.write("**Ingen deltakere**")
+                
+                # Competition actions
+                if is_current:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("📊 Eksporter data", key=f"export_{comp['id']}"):
+                            st.info("📊 Data-eksport kommer snart")
+                    
+                    with col2:
+                        if st.button("🔄 Nullstill konkuranse", key=f"reset_{comp['id']}", type="secondary"):
+                            st.warning("⚠️ Nullstilling av konkurranser kommer snart")
+        
+    except Exception as e:
+        st.error(f"Kunne ikke laste konkurranser: {e}")
+
+
+def show_admin_settings(user):
+    """Admin settings section"""
+    st.subheader("⚙️ Administrasjonsinnstillinger")
+    
+    # Company settings
+    st.markdown("### 🏢 Bedriftsinnstillinger")
+    
+    try:
+        db = get_db_helper()
+        company = db.get_company_by_id(user['company_id'])
+        
+        if company:
+            # Company name editing (placeholder)
+            new_company_name = st.text_input(
+                "Bedriftsnavn",
+                value=company['name'],
+                disabled=True,
+                help="Redigering av bedriftsnavn kommer snart"
+            )
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("💾 Oppdater bedriftsnavn", disabled=True):
+                    st.info("Bedriftsnavnendring kommer snart")
+            
+            with col2:
+                if st.button("🔄 Generer ny bedriftskode", disabled=True):
+                    st.info("Ny bedriftskode-generering kommer snart")
+        
+        st.markdown("---")
+        
+        # Activity management (placeholder)
+        st.markdown("### 🏃 Aktivitetsinnstillinger")
+        
+        activities = db.get_active_activities()
+        
+        st.write("**Tilgjengelige aktiviteter:**")
+        for activity in activities:
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                st.write(f"**{activity['name']}** ({activity['unit']})")
+            
+            with col2:
+                st.write("✅ Aktiv" if activity['is_active'] else "❌ Inaktiv")
+            
+            with col3:
+                if st.button("⚙️", key=f"edit_activity_{activity['id']}", help="Rediger aktivitet", disabled=True):
+                    st.info("Aktivitetsredigering kommer snart")
+        
+        st.markdown("---")
+        
+        # Data management
+        st.markdown("### 📊 Dataadministrasjon")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📄 Eksporter alle data", help="Eksporter all bedriftsdata"):
+                export_company_data(user)
+        
+        with col2:
+            if st.button("🗑️ Slett gamle data", help="Fjern data eldre enn 12 måneder", type="secondary", disabled=True):
+                st.warning("Data-sletting kommer snart")
+        
+        st.markdown("---")
+        
+        # Danger zone
+        st.markdown("### ⚠️ Fareområde")
+        
+        with st.expander("🚨 Avanserte operasjoner"):
+            st.warning("**Advarsel:** Disse operasjonene kan ikke angres!")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🔄 Nullstill alle konkurranser", type="secondary", disabled=True):
+                    st.error("Konkurransenullstilling kommer snart")
+            
+            with col2:
+                if st.button("🗑️ Slett bedrift", type="secondary", disabled=True):
+                    st.error("Bedriftssletting kommer snart")
+            
+            st.caption("💡 Kontakt support hvis du trenger hjelp med avanserte operasjoner")
+    
+    except Exception as e:
+        st.error(f"Kunne ikke laste innstillinger: {e}")
+
+
+def export_company_data(user):
+    """Export all company data"""
+    try:
+        db = get_db_helper()
+        
+        # Get all data for the company
+        company_users = db.get_users_by_company(user['company_id'])
+        competitions = db.get_competitions_for_company(user['company_id'], limit=24)
+        
+        total_entries = 0
+        
+        for comp in competitions:
+            for company_user in company_users:
+                entries = db.get_user_entries_for_competition(company_user['id'], comp['id'])
+                total_entries += len(entries)
+        
+        st.success(f"✅ Fant data for {len(company_users)} brukere over {len(competitions)} måneder")
+        st.info(f"📊 Totalt {total_entries} aktivitetsregistreringer")
+        st.warning("💡 Full data-eksport funksjonalitet kommer snart")
+        
+    except Exception as e:
+        st.error(f"Kunne ikke eksportere data: {e}")
