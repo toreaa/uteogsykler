@@ -463,12 +463,6 @@ def show_current_month_activities(user):
                         help=f"Hvor mye {activity_name.lower()} vil du legge til?"
                     )
                     
-                    # Show preview of new total
-                    if new_value > 0:
-                        new_total = current_total + new_value
-                        new_total_points = db.calculate_points_for_activity(activity_id, new_total)
-                        st.success(f"➡️ **Ny total blir:** {new_total} {activity_unit} ({new_total_points} poeng)")
-                    
                     # Submit button
                     submitted = st.form_submit_button(
                         f"➕ Legg til {activity_name}", 
