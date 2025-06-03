@@ -53,6 +53,18 @@ def is_authenticated():
 
 def show_login_page():
     """Show login/registration page"""
+    # Clear any existing sidebar content
+    st.sidebar.empty()
+    
+    # Hide sidebar completely for login page
+    st.markdown("""
+        <style>
+        .css-1d391kg {display: none}
+        [data-testid="stSidebar"] {display: none}
+        section[data-testid="stSidebar"] {display: none}
+        </style>
+        """, unsafe_allow_html=True)
+    
     st.title("🏆 Konkurranseapp")
     st.subheader("Intern konkurranseplattform for bedrifter")
     
@@ -220,6 +232,15 @@ def perform_registration(full_name: str, email: str, password: str, password_con
 
 def show_main_app():
     """Show main authenticated application"""
+    # Re-enable sidebar for authenticated users
+    st.markdown("""
+        <style>
+        .css-1d391kg {display: block}
+        [data-testid="stSidebar"] {display: block}
+        section[data-testid="stSidebar"] {display: block}
+        </style>
+        """, unsafe_allow_html=True)
+    
     user = st.session_state.user
     
     # Sidebar navigation
@@ -664,9 +685,6 @@ def get_activity_unit(activity_id: str, db) -> str:
         return ''
 
 
-
-
-
 def show_current_registrations(user, competition, user_entries, db):
     """Show user's current activity registrations"""
     st.subheader("📊 Dine registreringer denne måneden")
@@ -777,6 +795,11 @@ def show_activity_history(user):
         st.error(f"Kunne ikke laste historikk: {e}")
 
 
+def show_leaderboard_page(user):
+    """Leaderboard page - placeholder"""
+    st.title("🏆 Leaderboard")
+    st.info("Leaderboard-funksjoner kommer snart")
+
 
 def show_profile_page(user):
     """Profile page"""
@@ -796,10 +819,12 @@ def show_profile_page(user):
     except Exception as e:
         st.error(f"Kunne ikke hente bedriftsinformasjon: {e}")
 
+
 def show_admin_page(user):
     """Admin page - placeholder"""
     st.title("👑 Administrasjon")
     st.info("Admin-funksjoner kommer snart")
+
 
 def logout_user():
     """Handle logout"""
@@ -813,6 +838,7 @@ def logout_user():
     st.session_state.user = None
     st.session_state.current_page = 'dashboard'
     st.rerun()
+
 
 if __name__ == "__main__":
     main()
