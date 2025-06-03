@@ -517,85 +517,229 @@ def show_admin_settings(user):
             st.error("Kunne ikke laste bedriftsinformasjon")
             return
         
-        # Company settings
-        st.markdown("### 🏢 Bedriftsinnstillinger")
+        # Company info (read-only)
+        st.markdown("### 🏢 Bedriftsinformasjon")
+        
+        st.info(f"""
+        **Bedriftsnavn:** {company['name']}
+        **Bedriftskode:** {company['company_code']}
+        **Opprettet:** {company['created_at'][:10]}
+        """)
+        
+        st.caption("💡 Kontakt system administrator for å endre bedriftsnavn")
+        
+        st.markdown("---")
+        
+        # Competition management tools
+        st.markdown("### 🏆 Konkurranseadministrasjon")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.info(f"""
-            **Bedriftsnavn:** {company['name']}
-            **Bedriftskode:** {company['company_code']}
-            **Opprettet:** {company['created_at'][:10]}
-            """)
+            if st.button("🎯 Start ny månedlig konkuranse", help="Opprett konkurranseperiode for neste måned"):
+                create_next_month_competition(user)
         
         with col2:
-            # Company name editing
-            st.markdown("#### Endre bedriftsnavn")
-            new_company_name = st.text_input(
-                "Nytt bedriftsnavn",
-                placeholder=company['name'],
-                help="Skriv inn nytt navn for bedriften"
-            )
-            
-            if st.button("💾 Oppdater bedriftsnavn", disabled=not new_company_name):
-                if new_company_name and new_company_name != company['name']:
-                    update_company_name(company, new_company_name)
-                else:
-                    st.warning("Skriv inn et nytt navn som er forskjellig fra det nåværende")
+            if st.button("📊 Eksporter alle resultater", help="Last ned alle konkurranseresultater"):
+                export_all_competition_data(user)
         
         st.markdown("---")
         
-        # Activity overview (read-only for company admins)
+        # User management tools
+        st.markdown("### 👥 Brukeradministrasjon")
+        
+        # Bulk admin operations
+        st.markdown("#### Masseoppdateringer")
+        
+        company_users_response = supabase.table('users').select('*').eq('company_id', user['company_id']).execute()
+        company_users = company_users_response.data or []
+        
+        # Filter non-admin users for bulk operations
+        non_admin_users = [u for u in company_users if not u['is_admin'] and u['id'] != user['id']]
+        
+        if non_admin_users:
+            st.write("**Gi admin-rettigheter til flere brukere:**")
+            
+            user_names = [f"{u['full_name']} ({u['email']})" for u in non_admin_users]
+            selected_users = st.multiselect(
+                "Velg brukere som skal bli administratorer:",
+                user_names,
+                help="Hold Ctrl/Cmd for å velge flere"
+            )
+            
+            if selected_users and st.button("👑 Gi admin til valgte brukere"):
+                promote_multiple_users(non_admin_users, selected_users, user)
+        else:
+            st.info("Alle ansatte er allerede administratorer")
+        
+        st.markdown("---")
+        
+        # Activity overview (read-only)
         st.markdown("### 🏃 Aktivitetsoversikt")
         
         activities_response = supabase.table('activities').select('*').eq('is_active', True).order('name').execute()
         activities = activities_response.data or []
         
         st.write("**Tilgjengelige aktiviteter for dine ansatte:**")
-        for activity in activities:
-            with st.expander(f"🏃 {activity['name']} ({activity['unit']})"):
-                st.write(f"**Beskrivelse:** {activity['description']}")
-                
-                # Show scoring tiers
+        
+        if activities:
+            activity_summary = []
+            for activity in activities:
                 scoring_tiers = activity['scoring_tiers']['tiers']
-                st.write("**Poengskala:**")
-                for tier in scoring_tiers:
-                    min_val = tier['min']
-                    max_val = tier.get('max', '∞')
-                    points = tier['points']
-                    st.write(f"  • {min_val} - {max_val} {activity['unit']} = {points} poeng")
+                max_points = max(tier['points'] for tier in scoring_tiers)
+                activity_summary.append(f"• **{activity['name']}** ({activity['unit']}) - maks {max_points} poeng")
+            
+            for summary in activity_summary:
+                st.write(summary)
+        else:
+            st.info("Ingen aktiviteter tilgjengelig")
         
         st.markdown("---")
         
-        # System info
-        st.markdown("### ℹ️ Systeminformasjon")
+        # Admin info
+        st.markdown("### ℹ️ Administrator-informasjon")
+        
+        admin_count = sum(1 for u in company_users if u['is_admin'])
+        total_users = len(company_users)
         
         st.info(f"""
+        **Din rolle:** Administrator
+        **Totale administratorer:** {admin_count}
+        **Totale ansatte:** {total_users}
         **Siste oppdatering:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
-        **Admin:** {user['full_name']}
-        **Bedrifts-ID:** `{user['company_id']}`
         """)
         
     except Exception as e:
         st.error(f"Kunne ikke laste innstillinger: {e}")
 
 
-def update_company_name(company, new_name):
-    """Update company name"""
+def create_next_month_competition(user):
+    """Create competition for next month"""
     try:
         supabase = get_supabase()
         
-        response = supabase.table('companies').update({
-            'name': new_name.strip()
-        }).eq('id', company['id']).execute()
+        # Calculate next month
+        today = date.today()
+        if today.month == 12:
+            next_month = date(today.year + 1, 1, 1)
+        else:
+            next_month = date(today.year, today.month + 1, 1)
+        
+        # Check if competition already exists
+        existing_comp = supabase.table('monthly_competitions').select('*').eq('company_id', user['company_id']).eq('year_month', next_month.isoformat()).execute()
+        
+        if existing_comp.data:
+            st.warning(f"Konkurranseperiode for {next_month.strftime('%B %Y')} eksisterer allerede")
+            return
+        
+        # Create new competition
+        response = supabase.table('monthly_competitions').insert({
+            'company_id': user['company_id'],
+            'year_month': next_month.isoformat(),
+            'is_active': True
+        }).execute()
         
         if response.data:
-            st.success(f"✅ Bedriftsnavn oppdatert til: **{new_name}**")
+            st.success(f"✅ Ny konkurranseperiode opprettet for {next_month.strftime('%B %Y')}")
+            st.balloons()
+        else:
+            st.error("❌ Kunne ikke opprette konkurranseperiode")
+            
+    except Exception as e:
+        st.error(f"Feil ved opprettelse av konkurranseperiode: {e}")
+
+
+def export_all_competition_data(user):
+    """Export all competition data for the company"""
+    try:
+        supabase = get_supabase()
+        
+        # Get all competitions
+        competitions_response = supabase.table('monthly_competitions').select('*').eq('company_id', user['company_id']).order('year_month', desc=True).execute()
+        competitions = competitions_response.data or []
+        
+        if not competitions:
+            st.warning("Ingen konkurranser å eksportere")
+            return
+        
+        # Get company info
+        company_response = supabase.table('companies').select('*').eq('id', user['company_id']).execute()
+        company = company_response.data[0] if company_response.data else {'name': 'Ukjent bedrift'}
+        
+        # Create comprehensive export
+        export_text = f"KOMPLETT KONKURRANSEHISTORIKK - {company['name']}\n"
+        export_text += f"Eksportert: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        export_text += "=" * 60 + "\n\n"
+        
+        for comp in competitions:
+            comp_date = datetime.strptime(comp['year_month'], '%Y-%m-%d').date()
+            month_name = comp_date.strftime("%B %Y")
+            
+            leaderboard_response = supabase.rpc('get_competition_leaderboard', {'competition_id_param': comp['id']}).execute()
+            leaderboard = leaderboard_response.data or []
+            
+            export_text += f"MÅNED: {month_name}\n"
+            export_text += "-" * 30 + "\n"
+            
+            if leaderboard:
+                total_points = sum(entry['total_points'] for entry in leaderboard)
+                export_text += f"Deltakere: {len(leaderboard)}\n"
+                export_text += f"Totale poeng: {total_points}\n\n"
+                
+                for i, entry in enumerate(leaderboard, 1):
+                    export_text += f"{i:2d}. {entry['full_name']:25} - {entry['total_points']:4d} poeng ({entry['entries_count']} aktiviteter)\n"
+            else:
+                export_text += "Ingen deltakere\n"
+            
+            export_text += "\n" + "=" * 60 + "\n\n"
+        
+        st.text_area("📋 Komplett konkurransehistorikk (kopier teksten):", export_text, height=400)
+        st.success("✅ All konkurransedata eksportert")
+        
+    except Exception as e:
+        st.error(f"Kunne ikke eksportere data: {e}")
+
+
+def promote_multiple_users(all_users, selected_user_names, admin_user):
+    """Promote multiple users to admin"""
+    try:
+        supabase = get_supabase()
+        
+        # Find users to promote
+        users_to_promote = []
+        for user_name in selected_user_names:
+            for user in all_users:
+                if f"{user['full_name']} ({user['email']})" == user_name:
+                    users_to_promote.append(user)
+                    break
+        
+        if not users_to_promote:
+            st.error("Ingen brukere valgt")
+            return
+        
+        # Promote each user
+        success_count = 0
+        for user in users_to_promote:
+            response = supabase.table('users').update({
+                'is_admin': True,
+                'user_role': 'company_admin'
+            }).eq('id', user['id']).execute()
+            
+            if response.data:
+                success_count += 1
+        
+        if success_count > 0:
+            st.success(f"✅ {success_count} brukere ble gjort til administratorer!")
+            
+            # Show who was promoted
+            st.write("**Nye administratorer:**")
+            for user in users_to_promote[:success_count]:
+                st.write(f"• {user['full_name']}")
+            
             st.balloons()
             st.rerun()
         else:
-            st.error("❌ Kunne ikke oppdatere bedriftsnavn")
+            st.error("❌ Kunne ikke oppdatere noen brukere")
             
     except Exception as e:
-        st.error(f"Feil ved oppdatering av bedriftsnavn: {e}")
+        st.error(f"Feil ved masseoppdatering: {e}")
