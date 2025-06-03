@@ -70,7 +70,9 @@ def render_login_section():
             st.error("⚠️ Fyll inn både e-post og passord")
             return
         
-        perform_login(email, password)
+        login_success = perform_login(email, password)
+        if login_success:
+            st.rerun()  # Only rerun if login was successful
     
     if forgot_btn:
         if email:
@@ -135,7 +137,7 @@ def render_signup_section():
 
 def perform_login(email: str, password: str):
     """Handle login logic"""
-    with StreamlitErrorHandler(context="User Login"):
+    try:
         supabase = get_supabase()
         
         # Attempt login
@@ -158,16 +160,44 @@ def perform_login(email: str, password: str):
                     'full_name': user_profile['full_name'],
                     'company_id': user_profile['company_id'],
                     'is_admin': user_profile['is_admin'],
-                    'created_at': user_profile['created_at']
+                    'created_at': user_profile['created_at'],
+                    'email_confirmed': response.user.email_confirmed_at is not None
                 }
                 
                 st.success(f"🎉 Velkommen tilbake, {user_profile['full_name']}!")
                 st.balloons()
-                st.rerun()
+                # Move rerun outside the try-catch
+                return True  # Signal successful login
             else:
                 st.error("❌ Brukerregistrering ikke fullført. Kontakt support.")
+                return False
         else:
             st.error("❌ Ugyldig e-post eller passord")
+            return False
+            
+    except Exception as auth_error:
+        error_msg = str(auth_error)
+        st.error(f"❌ Pålogging feilet: {error_msg}")
+        
+        # Handle specific error cases
+        if "not confirmed" in error_msg.lower():
+            st.warning("📧 E-posten din er ikke bekreftet ennå")
+            st.info("💡 Sjekk innboksen din og klikk på bekreftelseslenken")
+            
+            # Offer to resend confirmation
+            if st.button("📤 Send ny bekreftelses-e-post"):
+                try:
+                    supabase.auth.resend(type="signup", email=email)
+                    st.success("✅ Ny bekreftelses-e-post sendt!")
+                except Exception as e:
+                    st.error(f"Kunne ikke sende e-post: {e}")
+                    
+        elif "invalid" in error_msg.lower():
+            st.info("💡 Sjekk at e-post og passord er riktig")
+        elif "too many" in error_msg.lower():
+            st.info("💡 For mange forsøk. Vent litt og prøv igjen")
+        
+        return False
 
 
 def perform_signup(full_name: str, email: str, password: str, password_confirm: str, 
@@ -232,29 +262,42 @@ def perform_signup(full_name: str, email: str, password: str, password_confirm: 
             st.success(f"✅ Gyldig bedriftskode! Du blir med i: **{company['name']}**")
         
         # Create user account
-        response = supabase.auth.sign_up({
-            "email": email,
-            "password": password
-        })
-        
-        if response.user:
-            # Create user profile in our database
-            user_profile = db.create_user(
-                user_id=response.user.id,
-                email=email,
-                full_name=full_name.strip(),
-                company_id=target_company_id,
-                is_admin=is_admin
-            )
+        try:
+            response = supabase.auth.sign_up({
+                "email": email,
+                "password": password
+            })
             
-            st.success("🎉 Konto opprettet!")
-            
-            if response.user.email_confirmed_at:
-                st.success("✅ Du kan nå logge inn med din nye konto")
+            if response.user:
+                # Success - create user profile
+                user_profile = db.create_user(
+                    user_id=response.user.id,
+                    email=email,
+                    full_name=full_name.strip(),
+                    company_id=target_company_id,
+                    is_admin=is_admin
+                )
+                
+                st.success("🎉 Konto opprettet!")
+                
+                if response.user.email_confirmed_at:
+                    st.success("✅ Du kan nå logge inn med din nye konto")
+                else:
+                    st.info("📧 Sjekk e-posten din for å bekrefte kontoen før du logger inn")
             else:
-                st.info("📧 Sjekk e-posten din for å bekrefte kontoen før du logger inn")
-        else:
-            st.error("❌ Kunne ikke opprette konto. Prøv igjen.")
+                st.error("❌ Kunne ikke opprette konto. Ukjent feil.")
+                
+        except Exception as auth_error:
+            error_msg = str(auth_error)
+            st.error(f"❌ Signup feil: {error_msg}")
+            
+            # Give specific guidance based on error
+            if "invalid" in error_msg.lower():
+                st.info("💡 Prøv en annen e-postadresse")
+            elif "already" in error_msg.lower():
+                st.info("💡 Denne e-posten er allerede registrert. Prøv å logge inn i stedet.")
+            elif "weak" in error_msg.lower():
+                st.info("💡 Prøv et sterkere passord")
 
 
 def render_user_dashboard():
