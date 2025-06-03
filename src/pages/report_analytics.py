@@ -699,6 +699,13 @@ def show_system_settings(user: Dict[str, Any]):
         col1, col2 = st.columns(2)
         
         with col1:
+        with col1:
+            st.info(f"""
+            **System Administrator:** {user['full_name']}
+            **Siste pålogging:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
+            **Bruker-ID:** `{user['id']}`
+            """)
+        
         with col2:
             st.info(f"""
             **System versjon:** 1.0.0
@@ -706,6 +713,247 @@ def show_system_settings(user: Dict[str, Any]):
             **Hosting:** Streamlit Cloud
             **Sist oppdatert:** {datetime.now().strftime('%Y-%m-%d')}
             """)
+        
+        st.markdown("---")
+        
+        # System administration
+        st.markdown("### 👑 System Administrator-administrasjon")
+        
+        # Get all system admins
+        supabase = get_supabase()
+        system_admins_response = supabase.table('system_admins').select("""
+            *, 
+            users(full_name, email, created_at)
+        """).eq('is_active', True).execute()
+        
+        system_admins = system_admins_response.data or []
+        
+        st.write(f"**System Administratorer ({len(system_admins)}):**")
+        
+        for admin in system_admins:
+            admin_user = admin['users']
+            with st.container():
+                col1, col2, col3 = st.columns([2, 1, 1])
+                
+                with col1:
+                    st.write(f"**{admin_user['full_name']}**")
+                    st.caption(f"📧 {admin_user['email']}")
+                
+                with col2:
+                    created_date = admin['created_at'][:10]
+                    st.caption(f"Admin siden: {created_date}")
+                
+                with col3:
+                    if admin['user_id'] != user['id']:  # Can't remove yourself
+                        if st.button("🗑️ Fjern", key=f"remove_sysadmin_{admin['id']}", 
+                                   type="secondary", help="Fjern system admin-tilgang"):
+                            remove_system_admin_confirmation(admin, admin_user)
+                
+                st.divider()
+        
+        # Add new system admin
+        st.markdown("#### ➕ Legg til ny System Administrator")
+        
+        with st.form("add_system_admin_form"):
+            admin_email = st.text_input("E-post til bruker som skal bli system admin", 
+                                      placeholder="bruker@bedrift.no")
+            
+            add_admin_btn = st.form_submit_button("👑 Gi system admin-tilgang", type="primary")
+        
+        if add_admin_btn and admin_email:
+            add_new_system_admin(admin_email, user)
+        
+        st.markdown("---")
+        
+        # Export and maintenance
+        st.markdown("### 📊 Data og vedlikehold")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📄 Eksporter systemdata", help="Eksporter sammendrag av all data"):
+                export_system_data()
+        
+        with col2:
+            if st.button("🔍 Sjekk system-helse", help="Kontroller database og system-tilstand"):
+                check_system_health()
+        
+    except Exception as e:
+        st.error(f"Kunne ikke laste system-innstillinger: {e}")
+
+
+def remove_system_admin_confirmation(admin: Dict[str, Any], admin_user: Dict[str, Any]):
+    """Show confirmation for removing system admin"""
+    st.error(f"⚠️ **ADVARSEL:** Du er i ferd med å fjerne system admin-tilgang fra {admin_user['full_name']}")
+    
+    if st.button(f"🗑️ JA, FJERN TILGANG", key=f"confirm_remove_{admin['id']}", type="secondary"):
+        remove_system_admin(admin, admin_user)
+
+
+def remove_system_admin(admin: Dict[str, Any], admin_user: Dict[str, Any]):
+    """Remove system admin access"""
+    try:
+        supabase = get_supabase()
+        
+        # Check if this would leave no system admins
+        remaining_admins = supabase.table('system_admins').select('*').eq('is_active', True).execute()
+        
+        if len(remaining_admins.data or []) <= 1:
+            st.error("❌ Kan ikke fjerne siste system administrator")
+            return
+        
+        # Deactivate system admin record
+        supabase.table('system_admins').update({
+            'is_active': False
+        }).eq('id', admin['id']).execute()
+        
+        # Update user role to company_admin if they have a company, otherwise user
+        user_data = supabase.table('users').select('company_id').eq('id', admin['user_id']).execute()
+        new_role = 'company_admin' if user_data.data and user_data.data[0].get('company_id') else 'user'
+        
+        supabase.table('users').update({
+            'user_role': new_role
+        }).eq('id', admin['user_id']).execute()
+        
+        st.success(f"✅ System admin-tilgang fjernet fra {admin_user['full_name']}")
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Feil ved fjerning av system admin: {e}")
+
+
+def add_new_system_admin(email: str, creating_user: Dict[str, Any]):
+    """Add new system admin by email"""
+    try:
+        supabase = get_supabase()
+        
+        # Find user by email
+        user_response = supabase.table('users').select('*').eq('email', email).execute()
+        
+        if not user_response.data:
+            st.error(f"❌ Fant ikke bruker med e-post: {email}")
+            return
+        
+        target_user = user_response.data[0]
+        
+        # Check if already system admin
+        if target_user.get('user_role') == 'system_admin':
+            st.warning(f"⚠️ {target_user['full_name']} er allerede system administrator")
+            return
+        
+        # Update user role to system_admin
+        supabase.table('users').update({
+            'user_role': 'system_admin'
+        }).eq('id', target_user['id']).execute()
+        
+        # Add to system_admins table
+        supabase.table('system_admins').insert({
+            'user_id': target_user['id'],
+            'created_by': creating_user['id'],
+            'is_active': True
+        }).execute()
+        
+        st.success(f"✅ {target_user['full_name']} er nå system administrator!")
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Feil ved opprettelse av system admin: {e}")
+
+
+def export_system_data():
+    """Export system data summary"""
+    try:
+        supabase = get_supabase()
+        
+        st.write("**📤 Eksporterer systemdata...**")
+        
+        # Get all data
+        companies = supabase.table('companies').select('*').execute().data or []
+        users = supabase.table('users').select('*').execute().data or []
+        activities = supabase.table('activities').select('*').execute().data or []
+        
+        # Create export summary
+        export_data = f"SYSTEM DATA EXPORT\n"
+        export_data += f"Eksportert: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        export_data += "=" * 50 + "\n\n"
+        
+        export_data += f"OVERSIKT:\n"
+        export_data += f"Bedrifter: {len(companies)}\n"
+        export_data += f"Brukere: {len(users)}\n"
+        export_data += f"Aktiviteter: {len(activities)}\n\n"
+        
+        export_data += "BEDRIFTER:\n"
+        for company in companies:
+            export_data += f"- {company['name']} ({company['company_code']}) - {company['created_at'][:10]}\n"
+        
+        export_data += f"\nBRUKERE:\n"
+        for user in users:
+            role = user.get('user_role', 'user')
+            export_data += f"- {user['full_name']} ({user['email']}) - {role} - {user['created_at'][:10]}\n"
+        
+        export_data += f"\nAKTIVITETER:\n"
+        for activity in activities:
+            status = "Aktiv" if activity['is_active'] else "Inaktiv"
+            export_data += f"- {activity['name']} ({activity['unit']}) - {status}\n"
+        
+        st.text_area("📋 System-data (kopier teksten):", export_data, height=400)
+        st.success("✅ System-data eksportert")
+        
+    except Exception as e:
+        st.error(f"Kunne ikke eksportere system-data: {e}")
+
+
+def check_system_health():
+    """Check system health and database status"""
+    try:
+        supabase = get_supabase()
+        
+        st.write("**🔍 Sjekker system-helse...**")
+        
+        # Test basic connectivity
+        companies_test = supabase.table('companies').select('count').execute()
+        users_test = supabase.table('users').select('count').execute()
+        activities_test = supabase.table('activities').select('count').execute()
+        
+        st.success("✅ Database-tilkobling: OK")
+        st.success("✅ Tabeller tilgjengelige: OK")
+        
+        # Test data integrity
+        st.write("**🔍 Sjekker data-integritet...**")
+        
+        # Check for orphaned users (users without companies)
+        orphaned_users = supabase.table('users').select('*').is_('company_id', 'null').execute()
+        orphaned_count = len(orphaned_users.data or [])
+        
+        if orphaned_count > 0:
+            st.warning(f"⚠️ Fant {orphaned_count} brukere uten bedrift")
+        else:
+            st.success("✅ Alle brukere har gyldig bedrift")
+        
+        # Check for companies without users
+        all_companies = supabase.table('companies').select('*').execute()
+        companies_without_users = 0
+        
+        for company in all_companies.data or []:
+            users_in_company = supabase.table('users').select('id').eq('company_id', company['id']).execute()
+            if not users_in_company.data:
+                companies_without_users += 1
+        
+        if companies_without_users > 0:
+            st.info(f"ℹ️ {companies_without_users} bedrifter har ingen brukere")
+        else:
+            st.success("✅ Alle bedrifter har minst én bruker")
+        
+        st.success("🎉 System-helse: God tilstand")
+        
+    except Exception as e:
+        st.error(f"❌ System-helse-sjekk feilet: {e}")
+
+
+if __name__ == "__main__":
+    # This page should only be accessed through the main app
+    st.error("❌ Denne siden kan kun åpnes gjennom hovedapplikasjonen")
+    st.info("Gå til hovedsiden og logg inn som system administrator")
         
         st.markdown("---")
         
