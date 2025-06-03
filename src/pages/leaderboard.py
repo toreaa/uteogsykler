@@ -134,13 +134,8 @@ def show_competition_leaderboard(user, competition, db):
             
             # Highlight current user
             if entry['user_id'] == user['id']:
-                with st.container():
-                    st.markdown(f"""
-                    <div style="background-color: #e8f4fd; padding: 10px; border-radius: 5px; border-left: 4px solid #1f77b4;">
-                        <strong>{get_medal(rank)} {name} (Du)</strong><br>
-                        🎯 {points} poeng • 📊 {entries_count} aktiviteter
-                    </div>
-                    """, unsafe_allow_html=True)
+                # Use Streamlit's built-in highlighting instead of custom HTML
+                st.info(f"{get_medal(rank)} **{name} (Du)** - {points} poeng • {entries_count} aktiviteter")
             else:
                 col1, col2, col3 = st.columns([1, 3, 2])
                 with col1:
