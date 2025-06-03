@@ -360,9 +360,242 @@ def show_dashboard_page(user):
         st.error(f"Kunne ikke laste dashboard-data: {e}")
 
 def show_activities_page(user):
-    """Activities page - placeholder"""
-    st.title("🏃 Aktiviteter")
-    st.info("Aktivitetsregistrering kommer i neste steg (Step 4.2)")
+    """Activities page - register and manage activities"""
+    st.title("🏃 Aktivitetsregistrering")
+    
+    # Tabs for current month vs history
+    tab1, tab2 = st.tabs(["📝 Denne måneden", "📈 Historikk"])
+    
+    with tab1:
+        show_current_month_activities(user)
+    
+    with tab2:
+        show_activity_history(user)
+
+
+def show_current_month_activities(user):
+    """Show current month activity registration"""
+    try:
+        db = get_db_helper()
+        
+        # Get current month competition
+        current_month = date.today().replace(day=1)
+        competition = db.get_or_create_monthly_competition(user['company_id'], current_month)
+        
+        # Show current month info
+        month_name = current_month.strftime("%B %Y")
+        st.info(f"📅 **Registrerer for:** {month_name}")
+        
+        # Get available activities
+        activities = db.get_active_activities()
+        
+        if not activities:
+            st.error("Ingen aktiviteter tilgjengelig")
+            return
+        
+        # Get user's existing entries for this month
+        user_entries = db.get_user_entries_for_competition(user['id'], competition['id'])
+        user_entries_dict = {entry['activity_id']: entry for entry in user_entries}
+        
+        # Show activity registration forms
+        st.subheader("📝 Registrer dine aktiviteter")
+        
+        with st.form("activity_registration_form"):
+            st.markdown("Fyll inn dine aktiviteter for denne måneden:")
+            
+            activity_values = {}
+            
+            for activity in activities:
+                activity_id = activity['id']
+                activity_name = activity['name']
+                activity_unit = activity['unit']
+                activity_description = activity['description']
+                
+                # Get current value if exists
+                current_value = 0.0
+                if activity_id in user_entries_dict:
+                    current_value = float(user_entries_dict[activity_id]['value'])
+                
+                st.markdown(f"**{activity_name}** ({activity_unit})")
+                st.caption(activity_description)
+                
+                # Show scoring tiers
+                scoring_tiers = activity['scoring_tiers']['tiers']
+                tier_text = " | ".join([
+                    f"{tier['min']}-{tier.get('max', '∞')} {activity_unit} = {tier['points']}p"
+                    for tier in scoring_tiers
+                ])
+                st.caption(f"🎯 Poeng: {tier_text}")
+                
+                # Input field
+                activity_values[activity_id] = st.number_input(
+                    f"Antall {activity_unit}",
+                    min_value=0.0,
+                    value=current_value,
+                    step=1.0 if activity_unit == 'k steps' else 0.1,
+                    key=f"activity_{activity_id}",
+                    help=f"Hvor mange {activity_unit} har du {activity_name.lower()} denne måneden?"
+                )
+                
+                # Show calculated points
+                if activity_values[activity_id] > 0:
+                    calculated_points = db.calculate_points_for_activity(activity_id, activity_values[activity_id])
+                    st.success(f"Dette gir: **{calculated_points} poeng**")
+                
+                st.markdown("---")
+            
+            # Submit button
+            submitted = st.form_submit_button("💾 Lagre aktiviteter", type="primary", use_container_width=True)
+        
+        if submitted:
+            save_activities(user, competition, activity_values, db)
+        
+        # Show current registrations
+        st.markdown("---")
+        show_current_registrations(user, competition, user_entries, db)
+        
+    except Exception as e:
+        st.error(f"Feil ved lasting av aktiviteter: {e}")
+
+
+def save_activities(user, competition, activity_values, db):
+    """Save activity registrations"""
+    try:
+        updated_count = 0
+        total_points = 0
+        
+        for activity_id, value in activity_values.items():
+            if value > 0:  # Only save non-zero values
+                entry = db.create_or_update_user_entry(
+                    user_id=user['id'],
+                    activity_id=activity_id,
+                    competition_id=competition['id'],
+                    value=value
+                )
+                updated_count += 1
+                total_points += entry['points']
+        
+        if updated_count > 0:
+            st.success(f"✅ Lagret {updated_count} aktiviteter! Totalt: {total_points} poeng")
+            st.balloons()
+            
+            # Update the page to show new data
+            st.rerun()
+        else:
+            st.warning("Ingen aktiviteter å lagre (alle verdier er 0)")
+            
+    except Exception as e:
+        st.error(f"Feil ved lagring: {e}")
+
+
+def show_current_registrations(user, competition, user_entries, db):
+    """Show user's current activity registrations"""
+    st.subheader("📊 Dine registreringer denne måneden")
+    
+    if user_entries:
+        total_points = 0
+        
+        # Create a nice table view
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+        
+        with col1:
+            st.write("**Aktivitet**")
+        with col2:
+            st.write("**Verdi**")
+        with col3:
+            st.write("**Poeng**")
+        with col4:
+            st.write("**Sist oppdatert**")
+        
+        st.markdown("---")
+        
+        for entry in user_entries:
+            activity = entry.get('activities', {})
+            activity_name = activity.get('name', 'Ukjent')
+            activity_unit = activity.get('unit', '')
+            
+            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+            
+            with col1:
+                st.write(f"🏃 {activity_name}")
+            with col2:
+                st.write(f"{entry['value']} {activity_unit}")
+            with col3:
+                st.write(f"**{entry['points']}** poeng")
+            with col4:
+                updated_date = entry['updated_at'][:10] if entry.get('updated_at') else entry['created_at'][:10]
+                st.write(updated_date)
+            
+            total_points += entry['points']
+        
+        st.markdown("---")
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+        with col1:
+            st.write("**🎯 TOTALT**")
+        with col2:
+            st.write("")
+        with col3:
+            st.write(f"**{total_points} poeng**")
+        with col4:
+            st.write("")
+        
+        # Show ranking hint
+        try:
+            leaderboard = db.get_leaderboard_for_competition(competition['id'])
+            user_rank = None
+            for i, entry in enumerate(leaderboard, 1):
+                if entry['user_id'] == user['id']:
+                    user_rank = i
+                    break
+            
+            if user_rank:
+                st.info(f"🏆 Du er på **plass {user_rank}** av {len(leaderboard)} deltakere")
+            
+        except Exception as e:
+            st.warning("Kunne ikke hente ranking-info")
+        
+    else:
+        st.info("Du har ikke registrert noen aktiviteter ennå denne måneden")
+        st.markdown("👆 Bruk skjemaet over for å registrere dine aktiviteter!")
+
+
+def show_activity_history(user):
+    """Show activity history for previous months"""
+    st.subheader("📈 Aktivitetshistorikk")
+    
+    try:
+        db = get_db_helper()
+        competitions = db.get_competitions_for_company(user['company_id'], limit=6)
+        
+        if len(competitions) <= 1:
+            st.info("Ingen historiske data ennå")
+            return
+        
+        # Skip current month (first in list)
+        historical_competitions = competitions[1:]
+        
+        for competition in historical_competitions:
+            month_date = datetime.strptime(competition['year_month'], '%Y-%m-%d').date()
+            month_name = month_date.strftime("%B %Y")
+            
+            with st.expander(f"📅 {month_name}"):
+                entries = db.get_user_entries_for_competition(user['id'], competition['id'])
+                
+                if entries:
+                    total_points = sum(entry['points'] for entry in entries)
+                    st.metric("Totale poeng", total_points)
+                    
+                    for entry in entries:
+                        activity = entry.get('activities', {})
+                        activity_name = activity.get('name', 'Ukjent')
+                        activity_unit = activity.get('unit', '')
+                        
+                        st.write(f"• **{activity_name}:** {entry['value']} {activity_unit} ({entry['points']} poeng)")
+                else:
+                    st.write("Ingen aktiviteter registrert denne måneden")
+                    
+    except Exception as e:
+        st.error(f"Kunne ikke laste historikk: {e}")
 
 def show_leaderboard_page(user):
     """Leaderboard page - placeholder"""
