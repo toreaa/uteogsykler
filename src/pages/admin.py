@@ -11,7 +11,6 @@ import os
 # Add src to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.database_helpers import get_db_helper
 from utils.supabase_client import get_supabase
 
 
@@ -22,8 +21,18 @@ def show_admin_page(user):
         st.info("Kun administratorer kan se denne siden")
         return
     
-    st.title("👑 Administrasjon")
+    st.title("👑 Bedrifts-administrasjon")
     st.markdown(f"Administrator-panel for **{user['full_name']}**")
+    
+    try:
+        supabase = get_supabase()
+        company = supabase.table('companies').select('*').eq('id', user['company_id']).execute()
+        company_info = company.data[0] if company.data else None
+        
+        if company_info:
+            st.info(f"🏢 **{company_info['name']}** (Kode: {company_info['company_code']})")
+    except:
+        st.warning("Kunne ikke laste bedriftsinformasjon")
     
     # Admin tabs
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -51,8 +60,9 @@ def show_user_management(user):
     st.subheader("👥 Brukeradministrasjon")
     
     try:
-        db = get_db_helper()
-        company_users = db.get_users_by_company(user['company_id'])
+        supabase = get_supabase()
+        company_users_response = supabase.table('users').select('*').eq('company_id', user['company_id']).order('created_at').execute()
+        company_users = company_users_response.data or []
         
         if not company_users:
             st.info("Ingen brukere funnet")
@@ -72,7 +82,7 @@ def show_user_management(user):
         
         st.markdown("---")
         
-        # User list with admin functions
+        # User list with admin actions
         st.markdown("### 📋 Brukerliste")
         
         for company_user in company_users:
@@ -105,25 +115,7 @@ def show_user_management(user):
         
         # Company code sharing
         st.markdown("---")
-        st.subheader("🔑 Bedriftskode")
-        
-        company = db.get_company_by_id(user['company_id'])
-        if company:
-            st.info(f"""
-            **Bedriftskode:** `{company['company_code']}`
-            
-            💡 Del denne koden med nye ansatte så de kan registrere seg i systemet
-            """)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("📋 Kopier kode", help="Kopierer bedriftskoden"):
-                    st.code(company['company_code'])
-                    st.success("✅ Kode vist over - kopier den manuelt")
-            
-            with col2:
-                if st.button("🔄 Generer ny bedriftskode", help="Lager ny kode (den gamle slutter å virke)"):
-                    generate_new_company_code(user, company)
+        show_company_code_section(user)
         
     except Exception as e:
         st.error(f"Kunne ikke laste brukere: {e}")
@@ -131,8 +123,6 @@ def show_user_management(user):
 
 def show_user_admin_actions(target_user, admin_user):
     """Show admin actions for a specific user"""
-    
-    # Create a unique key for this user's actions
     user_key = target_user['id'][-8:]  # Use last 8 chars of ID for unique key
     
     col1, col2 = st.columns(2)
@@ -157,7 +147,8 @@ def promote_user_to_admin(target_user, admin_user):
         
         # Update user admin status
         response = supabase.table('users').update({
-            'is_admin': True
+            'is_admin': True,
+            'user_role': 'company_admin'
         }).eq('id', target_user['id']).execute()
         
         if response.data:
@@ -174,20 +165,21 @@ def promote_user_to_admin(target_user, admin_user):
 def demote_user_from_admin(target_user, admin_user):
     """Demote user from admin"""
     try:
+        supabase = get_supabase()
+        
         # Check if this would leave no admins
-        db = get_db_helper()
-        company_users = db.get_users_by_company(admin_user['company_id'])
+        company_users_response = supabase.table('users').select('*').eq('company_id', admin_user['company_id']).execute()
+        company_users = company_users_response.data or []
         admin_count = sum(1 for u in company_users if u['is_admin'])
         
         if admin_count <= 1:
             st.error("❌ Kan ikke fjerne siste administrator. Bedriften må ha minst én admin.")
             return
         
-        supabase = get_supabase()
-        
         # Update user admin status
         response = supabase.table('users').update({
-            'is_admin': False
+            'is_admin': False,
+            'user_role': 'user'
         }).eq('id', target_user['id']).execute()
         
         if response.data:
@@ -203,11 +195,22 @@ def demote_user_from_admin(target_user, admin_user):
 def show_user_activity_summary(target_user):
     """Show summary of user's activity"""
     try:
-        db = get_db_helper()
+        supabase = get_supabase()
         current_month = date.today().replace(day=1)
-        competition = db.get_or_create_monthly_competition(target_user['company_id'], current_month)
         
-        user_entries = db.get_user_entries_for_competition(target_user['id'], competition['id'])
+        # Get or create current month competition
+        competition_response = supabase.table('monthly_competitions').select('*').eq('company_id', target_user['company_id']).eq('year_month', current_month.isoformat()).execute()
+        
+        if not competition_response.data:
+            st.write(f"**📊 Aktivitet for {target_user['full_name']} (denne måneden):**")
+            st.write("Ingen konkurranser opprettet ennå denne måneden")
+            return
+        
+        competition = competition_response.data[0]
+        
+        # Get user entries
+        user_entries_response = supabase.table('user_entries').select('*, activities(*)').eq('user_id', target_user['id']).eq('competition_id', competition['id']).execute()
+        user_entries = user_entries_response.data or []
         
         st.markdown(f"**📊 Aktivitet for {target_user['full_name']} (denne måneden):**")
         
@@ -227,30 +230,71 @@ def show_user_activity_summary(target_user):
         st.error(f"Kunne ikke laste brukeraktivitet: {e}")
 
 
-def generate_new_company_code(user, company):
-    """Generate new company code"""
-    if st.button("⚠️ Bekreft ny kode", type="secondary", help="Dette vil gjøre den gamle koden ugyldig"):
-        try:
-            supabase = get_supabase()
+def show_company_code_section(user):
+    """Show company code management section"""
+    st.subheader("🔑 Bedriftskode")
+    
+    try:
+        supabase = get_supabase()
+        company_response = supabase.table('companies').select('*').eq('id', user['company_id']).execute()
+        company = company_response.data[0] if company_response.data else None
+        
+        if company:
+            col1, col2 = st.columns([2, 1])
             
-            # Generate new code using database function
-            code_response = supabase.rpc('generate_company_code').execute()
-            new_code = code_response.data
-            
-            # Update company with new code
-            response = supabase.table('companies').update({
-                'company_code': new_code
-            }).eq('id', company['id']).execute()
-            
-            if response.data:
-                st.success(f"✅ Ny bedriftskode generert: **{new_code}**")
-                st.warning("⚠️ Den gamle koden fungerer ikke lenger")
-                st.rerun()
-            else:
-                st.error("❌ Kunne ikke generere ny kode")
+            with col1:
+                st.info(f"""
+                **Bedriftskode:** `{company['company_code']}`
                 
-        except Exception as e:
-            st.error(f"Feil ved generering av ny kode: {e}")
+                💡 Del denne koden med nye ansatte så de kan registrere seg i systemet
+                """)
+            
+            with col2:
+                if st.button("📋 Kopier kode", help="Viser koden så du kan kopiere den"):
+                    st.code(company['company_code'])
+                    st.success("✅ Kode vist over - kopier den manuelt")
+                
+                if st.button("🔄 Generer ny kode", help="Lager ny kode (den gamle slutter å virke)"):
+                    show_generate_new_code_section(company)
+    except Exception as e:
+        st.error(f"Kunne ikke laste bedriftsinformasjon: {e}")
+
+
+def show_generate_new_code_section(company):
+    """Show new code generation with confirmation"""
+    st.warning("⚠️ **ADVARSEL:** Generering av ny kode vil gjøre den gamle koden ugyldig!")
+    st.write("Dette betyr at:")
+    st.write("• Nye ansatte må bruke den nye koden")
+    st.write("• Den gamle koden kan ikke brukes lenger")
+    
+    if st.button("⚠️ JA, GENERER NY KODE", type="secondary", help="Dette kan ikke angres"):
+        generate_new_company_code(company)
+
+
+def generate_new_company_code(company):
+    """Generate new company code"""
+    try:
+        supabase = get_supabase()
+        
+        # Generate new code using database function
+        code_response = supabase.rpc('generate_company_code').execute()
+        new_code = code_response.data
+        
+        # Update company with new code
+        response = supabase.table('companies').update({
+            'company_code': new_code
+        }).eq('id', company['id']).execute()
+        
+        if response.data:
+            st.success(f"✅ Ny bedriftskode generert: **{new_code}**")
+            st.warning("⚠️ Den gamle koden fungerer ikke lenger")
+            st.balloons()
+            st.rerun()
+        else:
+            st.error("❌ Kunne ikke generere ny kode")
+            
+    except Exception as e:
+        st.error(f"Feil ved generering av ny kode: {e}")
 
 
 def show_company_statistics(user):
@@ -258,15 +302,33 @@ def show_company_statistics(user):
     st.subheader("📊 Bedriftsstatistikk")
     
     try:
-        db = get_db_helper()
+        supabase = get_supabase()
         
         # Get current month competition
         current_month = date.today().replace(day=1)
-        competition = db.get_or_create_monthly_competition(user['company_id'], current_month)
+        competition_response = supabase.table('monthly_competitions').select('*').eq('company_id', user['company_id']).eq('year_month', current_month.isoformat()).execute()
         
-        # Overall company stats
-        company_users = db.get_users_by_company(user['company_id'])
-        leaderboard = db.get_leaderboard_for_competition(competition['id'])
+        if not competition_response.data:
+            # Create competition if it doesn't exist
+            competition_create = supabase.table('monthly_competitions').insert({
+                'company_id': user['company_id'],
+                'year_month': current_month.isoformat(),
+                'is_active': True
+            }).execute()
+            competition = competition_create.data[0] if competition_create.data else None
+        else:
+            competition = competition_response.data[0]
+        
+        if not competition:
+            st.error("Kunne ikke laste eller opprette konkurransedata")
+            return
+        
+        # Get company users and leaderboard
+        company_users_response = supabase.table('users').select('*').eq('company_id', user['company_id']).execute()
+        company_users = company_users_response.data or []
+        
+        leaderboard_response = supabase.rpc('get_competition_leaderboard', {'competition_id_param': competition['id']}).execute()
+        leaderboard = leaderboard_response.data or []
         
         # Calculate stats
         total_users = len(company_users)
@@ -284,17 +346,45 @@ def show_company_statistics(user):
         with col3:
             st.metric("📈 Deltakelse", f"{participation_rate:.1f}%")
         
+        # Current month leaderboard preview
+        st.markdown("---")
+        st.subheader("🏆 Topp 5 denne måneden")
+        
+        if leaderboard:
+            for i, entry in enumerate(leaderboard[:5], 1):
+                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+                st.write(f"{medal} **{entry['full_name']}** - {entry['total_points']} poeng ({entry['entries_count']} aktiviteter)")
+        else:
+            st.info("Ingen aktivitetsregistreringer ennå denne måneden")
+        
         # Monthly breakdown
         st.markdown("---")
-        st.subheader("📅 Månedlig oversikt")
+        show_monthly_breakdown(user)
         
-        competitions = db.get_competitions_for_company(user['company_id'], limit=6)
+    except Exception as e:
+        st.error(f"Kunne ikke laste statistikk: {e}")
+
+
+def show_monthly_breakdown(user):
+    """Show monthly breakdown of competitions"""
+    st.subheader("📅 Månedlig oversikt")
+    
+    try:
+        supabase = get_supabase()
+        competitions_response = supabase.table('monthly_competitions').select('*').eq('company_id', user['company_id']).order('year_month', desc=True).limit(6).execute()
+        competitions = competitions_response.data or []
+        
+        if len(competitions) <= 1:
+            st.info("Ikke nok historiske data ennå - trenger minst 2 måneder")
+            return
         
         for comp in competitions[:3]:  # Show last 3 months
             comp_date = datetime.strptime(comp['year_month'], '%Y-%m-%d').date()
             month_name = comp_date.strftime("%B %Y")
             
-            comp_leaderboard = db.get_leaderboard_for_competition(comp['id'])
+            leaderboard_response = supabase.rpc('get_competition_leaderboard', {'competition_id_param': comp['id']}).execute()
+            comp_leaderboard = leaderboard_response.data or []
+            
             comp_active = len(comp_leaderboard)
             comp_total_points = sum(entry['total_points'] for entry in comp_leaderboard)
             
@@ -316,72 +406,8 @@ def show_company_statistics(user):
                         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
                         st.write(f"{medal} {entry['full_name']} - {entry['total_points']} poeng")
         
-        # Activity statistics
-        st.markdown("---")
-        show_activity_statistics(user, current_month)
-        
     except Exception as e:
-        st.error(f"Kunne ikke laste statistikk: {e}")
-
-
-def show_activity_statistics(user, current_month):
-    """Show activity statistics for the company"""
-    st.subheader("🏃 Aktivitetsstatistikk")
-    
-    try:
-        db = get_db_helper()
-        competition = db.get_or_create_monthly_competition(user['company_id'], current_month)
-        
-        # Get all activities
-        activities = db.get_active_activities()
-        
-        if not activities:
-            st.info("Ingen aktiviteter tilgjengelig")
-            return
-        
-        activity_stats = {}
-        
-        # Get all entries for current month
-        company_users = db.get_users_by_company(user['company_id'])
-        
-        for company_user in company_users:
-            user_entries = db.get_user_entries_for_competition(company_user['id'], competition['id'])
-            
-            for entry in user_entries:
-                activity = entry.get('activities', {})
-                activity_name = activity.get('name', 'Ukjent')
-                
-                if activity_name not in activity_stats:
-                    activity_stats[activity_name] = {
-                        'users': set(),
-                        'total_value': 0,
-                        'total_points': 0,
-                        'unit': activity.get('unit', '')
-                    }
-                
-                activity_stats[activity_name]['users'].add(company_user['id'])
-                activity_stats[activity_name]['total_value'] += entry['value']
-                activity_stats[activity_name]['total_points'] += entry['points']
-        
-        # Display activity stats
-        for activity_name, stats in activity_stats.items():
-            with st.expander(f"🏃 {activity_name}"):
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("Aktive brukere", len(stats['users']))
-                
-                with col2:
-                    st.metric(f"Total {stats['unit']}", f"{stats['total_value']:.1f}")
-                
-                with col3:
-                    st.metric("Totale poeng", stats['total_points'])
-        
-        if not activity_stats:
-            st.info("Ingen aktiviteter registrert denne måneden")
-    
-    except Exception as e:
-        st.error(f"Kunne ikke laste aktivitetsstatistikk: {e}")
+        st.error(f"Kunne ikke laste månedlig oversikt: {e}")
 
 
 def show_competition_management(user):
@@ -389,11 +415,13 @@ def show_competition_management(user):
     st.subheader("🏆 Konkurranseadministrasjon")
     
     try:
-        db = get_db_helper()
-        competitions = db.get_competitions_for_company(user['company_id'], limit=12)
+        supabase = get_supabase()
+        competitions_response = supabase.table('monthly_competitions').select('*').eq('company_id', user['company_id']).order('year_month', desc=True).limit(12).execute()
+        competitions = competitions_response.data or []
         
         if not competitions:
-            st.info("Ingen konkurranser funnet")
+            st.info("Ingen konkurranser funnet for din bedrift ennå.")
+            st.info("💡 Konkurranser opprettes automatisk når brukere begynner å registrere aktiviteter")
             return
         
         current_month = date.today().replace(day=1)
@@ -406,9 +434,10 @@ def show_competition_management(user):
             
             is_current = comp_date == current_month
             
+            leaderboard_response = supabase.rpc('get_competition_leaderboard', {'competition_id_param': comp['id']}).execute()
+            leaderboard = leaderboard_response.data or []
+            
             with st.expander(f"{'🔄 ' if is_current else '📅 '}{month_name}"):
-                leaderboard = db.get_leaderboard_for_competition(comp['id'])
-                
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
@@ -425,53 +454,43 @@ def show_competition_management(user):
                 with col3:
                     if leaderboard:
                         winner = leaderboard[0]
-                        st.write(f"**🏆 Vinner:** {winner['full_name']}")
+                        st.write(f"**🏆 Førsteplass:** {winner['full_name']}")
                         st.write(f"**Poeng:** {winner['total_points']}")
                     else:
                         st.write("**Ingen deltakere**")
                 
-                # Show full leaderboard for this competition
+                # Show full leaderboard
                 if leaderboard:
-                    st.markdown("**📊 Full leaderboard:**")
+                    st.markdown("**📊 Komplett leaderboard:**")
                     for i, entry in enumerate(leaderboard, 1):
                         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
                         st.write(f"{medal} {entry['full_name']} - {entry['total_points']} poeng ({entry['entries_count']} aktiviteter)")
                 
-                # Competition actions
-                if is_current:
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if st.button("📊 Eksporter data", key=f"export_{comp['id']}"):
-                            export_competition_data(comp, leaderboard)
-                    
-                    with col2:
-                        if st.button("🔄 Nullstill konkuranse", key=f"reset_{comp['id']}", type="secondary"):
-                            st.warning("⚠️ Nullstilling av konkurranser er ikke implementert ennå")
+                # Export data for this competition
+                if st.button("📊 Eksporter data", key=f"export_{comp['id']}"):
+                    export_competition_data(comp, leaderboard, month_name)
         
     except Exception as e:
         st.error(f"Kunne ikke laste konkurranser: {e}")
 
 
-def export_competition_data(competition, leaderboard):
+def export_competition_data(competition, leaderboard, month_name):
     """Export competition data"""
     try:
-        comp_date = datetime.strptime(competition['year_month'], '%Y-%m-%d').date()
-        month_name = comp_date.strftime("%B %Y")
-        
         st.success(f"📊 **Konkurransedata for {month_name}:**")
-        st.write(f"**Deltakere:** {len(leaderboard)}")
         
         if leaderboard:
             total_points = sum(entry['total_points'] for entry in leaderboard)
             total_entries = sum(entry['entries_count'] for entry in leaderboard)
             
-            st.write(f"**Totale poeng:** {total_points}")
-            st.write(f"**Totale aktivitetsregistreringer:** {total_entries}")
-            
             # Create exportable text
             export_text = f"Konkurranseresultater - {month_name}\n"
             export_text += "=" * 40 + "\n\n"
+            export_text += f"Totale deltakere: {len(leaderboard)}\n"
+            export_text += f"Totale poeng: {total_points}\n"
+            export_text += f"Totale aktivitetsregistreringer: {total_entries}\n\n"
+            export_text += "LEADERBOARD:\n"
+            export_text += "-" * 20 + "\n"
             
             for i, entry in enumerate(leaderboard, 1):
                 export_text += f"{i}. {entry['full_name']} - {entry['total_points']} poeng ({entry['entries_count']} aktiviteter)\n"
@@ -479,7 +498,7 @@ def export_competition_data(competition, leaderboard):
             st.text_area("📋 Kopier dataene under:", export_text, height=200)
             st.info("💡 Merk teksten over og kopier den for å eksportere dataene")
         else:
-            st.write("Ingen data å eksportere")
+            st.write("Ingen data å eksportere for denne måneden")
             
     except Exception as e:
         st.error(f"Kunne ikke eksportere data: {e}")
@@ -489,21 +508,29 @@ def show_admin_settings(user):
     """Admin settings section"""
     st.subheader("⚙️ Administrasjonsinnstillinger")
     
-    # Company settings
-    st.markdown("### 🏢 Bedriftsinnstillinger")
-    
     try:
-        db = get_db_helper()
-        company = db.get_company_by_id(user['company_id'])
+        supabase = get_supabase()
+        company_response = supabase.table('companies').select('*').eq('id', user['company_id']).execute()
+        company = company_response.data[0] if company_response.data else None
         
-        if company:
+        if not company:
+            st.error("Kunne ikke laste bedriftsinformasjon")
+            return
+        
+        # Company settings
+        st.markdown("### 🏢 Bedriftsinnstillinger")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
             st.info(f"""
             **Bedriftsnavn:** {company['name']}
             **Bedriftskode:** {company['company_code']}
             **Opprettet:** {company['created_at'][:10]}
             """)
-            
-            # Company name editing (placeholder for now)
+        
+        with col2:
+            # Company name editing
             st.markdown("#### Endre bedriftsnavn")
             new_company_name = st.text_input(
                 "Nytt bedriftsnavn",
@@ -519,17 +546,16 @@ def show_admin_settings(user):
         
         st.markdown("---")
         
-        # Activity management
-        st.markdown("### 🏃 Aktivitetsinnstillinger")
+        # Activity overview (read-only for company admins)
+        st.markdown("### 🏃 Aktivitetsoversikt")
         
-        activities = db.get_active_activities()
+        activities_response = supabase.table('activities').select('*').eq('is_active', True).order('name').execute()
+        activities = activities_response.data or []
         
-        st.write("**Tilgjengelige aktiviteter:**")
+        st.write("**Tilgjengelige aktiviteter for dine ansatte:**")
         for activity in activities:
             with st.expander(f"🏃 {activity['name']} ({activity['unit']})"):
                 st.write(f"**Beskrivelse:** {activity['description']}")
-                st.write(f"**Enhet:** {activity['unit']}")
-                st.write(f"**Status:** {'✅ Aktiv' if activity['is_active'] else '❌ Inaktiv'}")
                 
                 # Show scoring tiers
                 scoring_tiers = activity['scoring_tiers']['tiers']
@@ -539,21 +565,6 @@ def show_admin_settings(user):
                     max_val = tier.get('max', '∞')
                     points = tier['points']
                     st.write(f"  • {min_val} - {max_val} {activity['unit']} = {points} poeng")
-        
-        st.markdown("---")
-        
-        # Data management
-        st.markdown("### 📊 Dataadministrasjon")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("📄 Eksporter alle data", help="Eksporter all bedriftsdata"):
-                export_company_data(user)
-        
-        with col2:
-            if st.button("📊 Statistikkoversikt", help="Vis detaljert statistikk"):
-                show_detailed_statistics(user)
         
         st.markdown("---")
         
@@ -581,106 +592,10 @@ def update_company_name(company, new_name):
         
         if response.data:
             st.success(f"✅ Bedriftsnavn oppdatert til: **{new_name}**")
+            st.balloons()
             st.rerun()
         else:
             st.error("❌ Kunne ikke oppdatere bedriftsnavn")
             
     except Exception as e:
         st.error(f"Feil ved oppdatering av bedriftsnavn: {e}")
-
-
-def show_detailed_statistics(user):
-    """Show detailed company statistics"""
-    try:
-        db = get_db_helper()
-        
-        st.markdown("**📊 Detaljert statistikk:**")
-        
-        # Get all competitions
-        competitions = db.get_competitions_for_company(user['company_id'], limit=12)
-        company_users = db.get_users_by_company(user['company_id'])
-        
-        total_competitions = len(competitions)
-        total_users = len(company_users)
-        
-        # Calculate total activity across all time
-        total_entries = 0
-        total_points = 0
-        
-        for comp in competitions:
-            leaderboard = db.get_leaderboard_for_competition(comp['id'])
-            for entry in leaderboard:
-                total_entries += entry['entries_count']
-                total_points += entry['total_points']
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("🏆 Konkurranser", total_competitions)
-        
-        with col2:
-            st.metric("👥 Brukere", total_users)
-        
-        with col3:
-            st.metric("📊 Registreringer", total_entries)
-        
-        with col4:
-            st.metric("🎯 Totale poeng", total_points)
-        
-        if total_users > 0:
-            avg_entries = total_entries / total_users
-            avg_points = total_points / total_users
-            
-            st.write(f"**📈 Gjennomsnitt per bruker:**")
-            st.write(f"• {avg_entries:.1f} registreringer")
-            st.write(f"• {avg_points:.1f} poeng")
-        
-    except Exception as e:
-        st.error(f"Kunne ikke laste detaljert statistikk: {e}")
-
-
-def export_company_data(user):
-    """Export all company data"""
-    try:
-        db = get_db_helper()
-        
-        # Get all data for the company
-        company = db.get_company_by_id(user['company_id'])
-        company_users = db.get_users_by_company(user['company_id'])
-        competitions = db.get_competitions_for_company(user['company_id'], limit=24)
-        
-        total_entries = 0
-        
-        for comp in competitions:
-            for company_user in company_users:
-                entries = db.get_user_entries_for_competition(company_user['id'], comp['id'])
-                total_entries += len(entries)
-        
-        st.success(f"✅ **Dataeksport for {company['name']}**")
-        st.write(f"**Brukere:** {len(company_users)}")
-        st.write(f"**Konkurranser:** {len(competitions)} måneder")
-        st.write(f"**Aktivitetsregistreringer:** {total_entries}")
-        
-        # Create summary export text
-        export_summary = f"Bedriftsdata - {company['name']}\n"
-        export_summary += f"Bedriftskode: {company['company_code']}\n"
-        export_summary += f"Eksportert: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        export_summary += "=" * 50 + "\n\n"
-        
-        export_summary += f"Brukere ({len(company_users)}):\n"
-        for user_info in company_users:
-            role = "Admin" if user_info['is_admin'] else "Bruker"
-            export_summary += f"- {user_info['full_name']} ({user_info['email']}) - {role}\n"
-        
-        export_summary += f"\nKonkurranser ({len(competitions)}):\n"
-        for comp in competitions:
-            comp_date = datetime.strptime(comp['year_month'], '%Y-%m-%d').date()
-            month_name = comp_date.strftime("%B %Y")
-            leaderboard = db.get_leaderboard_for_competition(comp['id'])
-            export_summary += f"- {month_name}: {len(leaderboard)} deltakere\n"
-        
-        st.text_area("📋 Sammendrag (kopier teksten):", export_summary, height=300)
-        st.info("💡 Full data-eksport med detaljerte aktivitetsdata kommer snart")
-        
-    except Exception as e:
-        st.error(f"Kunne ikke eksportere data: {e}")
