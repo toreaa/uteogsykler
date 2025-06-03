@@ -16,6 +16,9 @@ from utils.database_helpers import get_db_helper
 from utils.error_handler import StreamlitErrorHandler, validate_email
 from pages.leaderboard import show_leaderboard_page
 from pages.activities import show_activities_page
+from pages.dashboard import show_dashboard_page
+from pages.profile import show_profile_page
+from pages.admin import show_admin_page
 
 st.set_page_config(
     page_title="Konkurranseapp",
