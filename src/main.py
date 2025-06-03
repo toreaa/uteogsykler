@@ -397,11 +397,18 @@ def show_current_month_activities(user):
         user_entries = db.get_user_entries_for_competition(user['id'], competition['id'])
         user_entries_dict = {entry['activity_id']: entry for entry in user_entries}
         
+        # Show current totals first
+        if user_entries:
+            st.subheader("📊 Dine totaler denne måneden")
+            show_current_registrations(user, competition, user_entries, db)
+            st.markdown("---")
+        
         # Show activity registration forms
-        st.subheader("📝 Registrer dine aktiviteter")
+        st.subheader("➕ Legg til ny aktivitet")
+        st.info("💡 **Tips:** Verdiene du legger inn blir **lagt til** dine eksisterende totaler for måneden")
         
         with st.form("activity_registration_form"):
-            st.markdown("Fyll inn dine aktiviteter for denne måneden:")
+            st.markdown("Legg til nye aktiviteter:")
             
             activity_values = {}
             
@@ -411,10 +418,10 @@ def show_current_month_activities(user):
                 activity_unit = activity['unit']
                 activity_description = activity['description']
                 
-                # Get current value if exists
-                current_value = 0.0
+                # Get current total if exists
+                current_total = 0.0
                 if activity_id in user_entries_dict:
-                    current_value = float(user_entries_dict[activity_id]['value'])
+                    current_total = float(user_entries_dict[activity_id]['value'])
                 
                 st.markdown(f"**{activity_name}** ({activity_unit})")
                 st.caption(activity_description)
@@ -427,65 +434,184 @@ def show_current_month_activities(user):
                 ])
                 st.caption(f"🎯 Poeng: {tier_text}")
                 
-                # Input field
-                activity_values[activity_id] = st.number_input(
-                    f"Antall {activity_unit}",
+                # Show current total
+                if current_total > 0:
+                    current_points = db.calculate_points_for_activity(activity_id, current_total)
+                    st.info(f"📈 **Nåværende total:** {current_total} {activity_unit} ({current_points} poeng)")
+                
+                # Input field for NEW value to ADD
+                new_value = st.number_input(
+                    f"Legg til {activity_unit}",
                     min_value=0.0,
-                    value=current_value,
+                    value=0.0,
                     step=1.0 if activity_unit == 'k steps' else 0.1,
-                    key=f"activity_{activity_id}",
-                    help=f"Hvor mange {activity_unit} har du {activity_name.lower()} denne måneden?"
+                    key=f"add_activity_{activity_id}",
+                    help=f"Hvor mye vil du legge til i {activity_name.lower()}?"
                 )
                 
-                # Show calculated points
-                if activity_values[activity_id] > 0:
-                    calculated_points = db.calculate_points_for_activity(activity_id, activity_values[activity_id])
-                    st.success(f"Dette gir: **{calculated_points} poeng**")
+                activity_values[activity_id] = new_value
+                
+                # Show what the NEW TOTAL would be
+                if new_value > 0:
+                    new_total = current_total + new_value
+                    new_total_points = db.calculate_points_for_activity(activity_id, new_total)
+                    st.success(f"➡️ **Ny total blir:** {new_total} {activity_unit} ({new_total_points} poeng)")
                 
                 st.markdown("---")
             
             # Submit button
-            submitted = st.form_submit_button("💾 Lagre aktiviteter", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("➕ Legg til aktiviteter", type="primary", use_container_width=True)
         
         if submitted:
-            save_activities(user, competition, activity_values, db)
+            add_activities(user, competition, activity_values, user_entries_dict, db)
         
-        # Show current registrations
-        st.markdown("---")
-        show_current_registrations(user, competition, user_entries, db)
+        # Show alternative: Reset/Edit existing
+        if user_entries:
+            st.markdown("---")
+            st.subheader("✏️ Rediger eksisterende verdier")
+            
+            with st.expander("🔧 Endre totaler direkte"):
+                st.warning("⚠️ Dette vil **overskrive** dine eksisterende totaler")
+                
+                with st.form("edit_totals_form"):
+                    edit_values = {}
+                    
+                    for activity in activities:
+                        activity_id = activity['id']
+                        if activity_id in user_entries_dict:
+                            activity_name = activity['name']
+                            activity_unit = activity['unit']
+                            current_total = float(user_entries_dict[activity_id]['value'])
+                            
+                            edit_values[activity_id] = st.number_input(
+                                f"Total {activity_name} ({activity_unit})",
+                                min_value=0.0,
+                                value=current_total,
+                                step=1.0 if activity_unit == 'k steps' else 0.1,
+                                key=f"edit_activity_{activity_id}"
+                            )
+                    
+                    edit_submitted = st.form_submit_button("💾 Oppdater totaler", type="secondary")
+                
+                if edit_submitted:
+                    update_activities(user, competition, edit_values, db)
         
     except Exception as e:
         st.error(f"Feil ved lasting av aktiviteter: {e}")
 
 
-def save_activities(user, competition, activity_values, db):
-    """Save activity registrations"""
+def add_activities(user, competition, activity_values, existing_entries, db):
+    """Add new activities to existing totals"""
     try:
         updated_count = 0
         total_points = 0
         
-        for activity_id, value in activity_values.items():
-            if value > 0:  # Only save non-zero values
-                entry = db.create_or_update_user_entry(
+        for activity_id, new_value in activity_values.items():
+            if new_value > 0:  # Only process non-zero additions
+                # Calculate new total (existing + new)
+                current_total = 0.0
+                if activity_id in existing_entries:
+                    current_total = float(existing_entries[activity_id]['value'])
+                
+                new_total = current_total + new_value
+                
+                # Use our fixed upsert function
+                entry = upsert_user_entry(
                     user_id=user['id'],
                     activity_id=activity_id,
                     competition_id=competition['id'],
-                    value=value
+                    value=new_total,
+                    db=db
                 )
+                
                 updated_count += 1
                 total_points += entry['points']
+                
+                # Show what was added
+                st.success(f"✅ Lagt til {new_value} til {get_activity_name(activity_id, db)} (ny total: {new_total})")
         
         if updated_count > 0:
-            st.success(f"✅ Lagret {updated_count} aktiviteter! Totalt: {total_points} poeng")
+            st.success(f"🎉 Oppdatert {updated_count} aktiviteter! Totale poeng nå: {total_points}")
             st.balloons()
-            
-            # Update the page to show new data
             st.rerun()
         else:
-            st.warning("Ingen aktiviteter å lagre (alle verdier er 0)")
+            st.warning("Ingen nye aktiviteter å legge til (alle verdier er 0)")
             
     except Exception as e:
         st.error(f"Feil ved lagring: {e}")
+
+
+def update_activities(user, competition, activity_values, db):
+    """Update existing activity totals directly"""
+    try:
+        updated_count = 0
+        
+        for activity_id, new_total in activity_values.items():
+            entry = upsert_user_entry(
+                user_id=user['id'],
+                activity_id=activity_id,
+                competition_id=competition['id'],
+                value=new_total,
+                db=db
+            )
+            updated_count += 1
+        
+        if updated_count > 0:
+            st.success(f"✅ Oppdatert {updated_count} aktiviteter!")
+            st.rerun()
+            
+    except Exception as e:
+        st.error(f"Feil ved oppdatering: {e}")
+
+
+def upsert_user_entry(user_id: str, activity_id: str, competition_id: str, value: float, db):
+    """Safely insert or update user entry to avoid duplicate key constraint"""
+    try:
+        # Calculate points
+        points = db.calculate_points_for_activity(activity_id, value)
+        
+        # Try to update first
+        supabase = get_supabase()
+        
+        # Check if entry exists
+        existing = supabase.table('user_entries').select('id').eq('user_id', user_id).eq('activity_id', activity_id).eq('competition_id', competition_id).execute()
+        
+        if existing.data:
+            # Update existing entry
+            response = supabase.table('user_entries').update({
+                'value': value,
+                'points': points,
+                'updated_at': datetime.now().isoformat()
+            }).eq('user_id', user_id).eq('activity_id', activity_id).eq('competition_id', competition_id).execute()
+        else:
+            # Insert new entry
+            response = supabase.table('user_entries').insert({
+                'user_id': user_id,
+                'activity_id': activity_id,
+                'competition_id': competition_id,
+                'value': value,
+                'points': points
+            }).execute()
+        
+        if response.data:
+            return response.data[0]
+        else:
+            raise Exception("No data returned from upsert")
+            
+    except Exception as e:
+        raise Exception(f"Feil ved lagring av registrering: {e}")
+
+
+def get_activity_name(activity_id: str, db) -> str:
+    """Get activity name by ID"""
+    try:
+        activity = db.get_activity_by_id(activity_id)
+        return activity['name'] if activity else 'Ukjent aktivitet'
+    except:
+        return 'Ukjent aktivitet'
+
+
+
 
 
 def show_current_registrations(user, competition, user_entries, db):
