@@ -407,63 +407,79 @@ def show_current_month_activities(user):
         st.subheader("➕ Legg til ny aktivitet")
         st.info("💡 **Tips:** Verdiene du legger inn blir **lagt til** dine eksisterende totaler for måneden")
         
-        with st.form("activity_registration_form"):
-            st.markdown("Legg til nye aktiviteter:")
+        # Activity selector dropdown
+        activities_dict = {activity['id']: activity for activity in activities}
+        activity_options = [f"{activity['name']} ({activity['unit']})" for activity in activities]
+        
+        selected_activity_display = st.selectbox(
+            "🏃 Velg aktivitet å registrere:",
+            activity_options,
+            help="Velg hvilken aktivitet du vil legge til data for"
+        )
+        
+        # Find selected activity
+        selected_activity = None
+        for activity in activities:
+            if f"{activity['name']} ({activity['unit']})" == selected_activity_display:
+                selected_activity = activity
+                break
+        
+        if selected_activity:
+            activity_id = selected_activity['id']
+            activity_name = selected_activity['name']
+            activity_unit = selected_activity['unit']
+            activity_description = selected_activity['description']
             
-            activity_values = {}
-            
-            for activity in activities:
-                activity_id = activity['id']
-                activity_name = activity['name']
-                activity_unit = activity['unit']
-                activity_description = activity['description']
+            # Show selected activity details
+            with st.container():
+                st.markdown(f"### {activity_name}")
+                st.caption(activity_description)
+                
+                # Show scoring tiers
+                scoring_tiers = selected_activity['scoring_tiers']['tiers']
+                tier_text = " | ".join([
+                    f"{tier['min']}-{tier.get('max', '∞')} {activity_unit} = {tier['points']}p"
+                    for tier in scoring_tiers
+                ])
+                st.caption(f"🎯 **Poengskala:** {tier_text}")
                 
                 # Get current total if exists
                 current_total = 0.0
                 if activity_id in user_entries_dict:
                     current_total = float(user_entries_dict[activity_id]['value'])
-                
-                st.markdown(f"**{activity_name}** ({activity_unit})")
-                st.caption(activity_description)
-                
-                # Show scoring tiers
-                scoring_tiers = activity['scoring_tiers']['tiers']
-                tier_text = " | ".join([
-                    f"{tier['min']}-{tier.get('max', '∞')} {activity_unit} = {tier['points']}p"
-                    for tier in scoring_tiers
-                ])
-                st.caption(f"🎯 Poeng: {tier_text}")
-                
-                # Show current total
-                if current_total > 0:
                     current_points = db.calculate_points_for_activity(activity_id, current_total)
                     st.info(f"📈 **Nåværende total:** {current_total} {activity_unit} ({current_points} poeng)")
                 
-                # Input field for NEW value to ADD
-                new_value = st.number_input(
-                    f"Legg til {activity_unit}",
-                    min_value=0.0,
-                    value=0.0,
-                    step=1.0 if activity_unit == 'k steps' else 0.1,
-                    key=f"add_activity_{activity_id}",
-                    help=f"Hvor mye vil du legge til i {activity_name.lower()}?"
-                )
+                # Registration form for selected activity
+                with st.form("single_activity_form", clear_on_submit=True):
+                    st.markdown(f"**Legg til {activity_name}:**")
+                    
+                    new_value = st.number_input(
+                        f"Antall {activity_unit} å legge til",
+                        min_value=0.0,
+                        value=0.0,
+                        step=1.0 if activity_unit == 'k steps' else 0.1,
+                        key="single_activity_input",
+                        help=f"Hvor mye {activity_name.lower()} vil du legge til?"
+                    )
+                    
+                    # Show preview of new total
+                    if new_value > 0:
+                        new_total = current_total + new_value
+                        new_total_points = db.calculate_points_for_activity(activity_id, new_total)
+                        st.success(f"➡️ **Ny total blir:** {new_total} {activity_unit} ({new_total_points} poeng)")
+                    
+                    # Submit button
+                    submitted = st.form_submit_button(
+                        f"➕ Legg til {activity_name}", 
+                        type="primary", 
+                        use_container_width=True
+                    )
                 
-                activity_values[activity_id] = new_value
-                
-                # Show what the NEW TOTAL would be
-                if new_value > 0:
-                    new_total = current_total + new_value
-                    new_total_points = db.calculate_points_for_activity(activity_id, new_total)
-                    st.success(f"➡️ **Ny total blir:** {new_total} {activity_unit} ({new_total_points} poeng)")
-                
-                st.markdown("---")
-            
-            # Submit button
-            submitted = st.form_submit_button("➕ Legg til aktiviteter", type="primary", use_container_width=True)
-        
-        if submitted:
-            add_activities(user, competition, activity_values, user_entries_dict, db)
+                if submitted and new_value > 0:
+                    add_single_activity(user, competition, activity_id, new_value, current_total, db)
+                elif submitted and new_value == 0:
+                    st.warning("Skriv inn en verdi større enn 0")
         
         # Show alternative: Reset/Edit existing
         if user_entries:
@@ -500,8 +516,37 @@ def show_current_month_activities(user):
         st.error(f"Feil ved lasting av aktiviteter: {e}")
 
 
+def add_single_activity(user, competition, activity_id, new_value, current_total, db):
+    """Add single activity value and refresh page"""
+    try:
+        # Calculate new total
+        new_total = current_total + new_value
+        
+        # Use our fixed upsert function
+        entry = upsert_user_entry(
+            user_id=user['id'],
+            activity_id=activity_id,
+            competition_id=competition['id'],
+            value=new_total,
+            db=db
+        )
+        
+        activity_name = get_activity_name(activity_id, db)
+        activity_unit = get_activity_unit(activity_id, db)
+        
+        st.success(f"✅ Lagt til {new_value} {activity_unit} til {activity_name}")
+        st.success(f"🎯 Ny total: {new_total} {activity_unit} ({entry['points']} poeng)")
+        st.balloons()
+        
+        # Auto refresh page to clear form and show updated data
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Feil ved lagring: {e}")
+
+
 def add_activities(user, competition, activity_values, existing_entries, db):
-    """Add new activities to existing totals"""
+    """Add new activities to existing totals (legacy function - kept for edit mode)"""
     try:
         updated_count = 0
         total_points = 0
@@ -609,6 +654,15 @@ def get_activity_name(activity_id: str, db) -> str:
         return activity['name'] if activity else 'Ukjent aktivitet'
     except:
         return 'Ukjent aktivitet'
+
+
+def get_activity_unit(activity_id: str, db) -> str:
+    """Get activity unit by ID"""
+    try:
+        activity = db.get_activity_by_id(activity_id)
+        return activity['unit'] if activity else ''
+    except:
+        return ''
 
 
 
