@@ -231,7 +231,7 @@ def show_user_activity_summary(target_user):
 
 
 def show_company_code_section(user):
-    """Show company code management section"""
+    """Show company code management section - read only for company admin"""
     st.subheader("🔑 Bedriftskode")
     
     try:
@@ -240,13 +240,15 @@ def show_company_code_section(user):
         company = company_response.data[0] if company_response.data else None
         
         if company:
-            col1, col2 = st.columns([2, 1])
+            col1, col2 = st.columns([3, 1])
             
             with col1:
                 st.info(f"""
                 **Bedriftskode:** `{company['company_code']}`
                 
                 💡 Del denne koden med nye ansatte så de kan registrere seg i systemet
+                
+                ⚠️ Kun system administrator kan generere ny bedriftskode
                 """)
             
             with col2:
@@ -254,47 +256,15 @@ def show_company_code_section(user):
                     st.code(company['company_code'])
                     st.success("✅ Kode vist over - kopier den manuelt")
                 
-                if st.button("🔄 Generer ny kode", help="Lager ny kode (den gamle slutter å virke)"):
-                    show_generate_new_code_section(company)
+                st.caption("🔒 Ny kode: Kun system admin")
+                
     except Exception as e:
         st.error(f"Kunne ikke laste bedriftsinformasjon: {e}")
 
 
-def show_generate_new_code_section(company):
-    """Show new code generation with confirmation"""
-    st.warning("⚠️ **ADVARSEL:** Generering av ny kode vil gjøre den gamle koden ugyldig!")
-    st.write("Dette betyr at:")
-    st.write("• Nye ansatte må bruke den nye koden")
-    st.write("• Den gamle koden kan ikke brukes lenger")
-    
-    if st.button("⚠️ JA, GENERER NY KODE", type="secondary", help="Dette kan ikke angres"):
-        generate_new_company_code(company)
-
-
-def generate_new_company_code(company):
-    """Generate new company code"""
-    try:
-        supabase = get_supabase()
-        
-        # Generate new code using database function
-        code_response = supabase.rpc('generate_company_code').execute()
-        new_code = code_response.data
-        
-        # Update company with new code
-        response = supabase.table('companies').update({
-            'company_code': new_code
-        }).eq('id', company['id']).execute()
-        
-        if response.data:
-            st.success(f"✅ Ny bedriftskode generert: **{new_code}**")
-            st.warning("⚠️ Den gamle koden fungerer ikke lenger")
-            st.balloons()
-            st.rerun()
-        else:
-            st.error("❌ Kunne ikke generere ny kode")
-            
-    except Exception as e:
-        st.error(f"Feil ved generering av ny kode: {e}")
+# Remove these functions since company admin can't generate new codes anymore:
+# - show_generate_new_code_section()
+# - generate_new_company_code()
 
 
 def show_company_statistics(user):
