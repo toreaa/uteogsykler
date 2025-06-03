@@ -14,18 +14,14 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from utils.supabase_client import get_supabase
 from utils.database_helpers import get_db_helper
 from utils.error_handler import StreamlitErrorHandler, validate_email
-from pages.leaderboard import show_leaderboard_page
-from pages.activities import show_activities_page
-from pages.dashboard import show_dashboard_page
-from pages.profile import show_profile_page
-from pages.admin import show_admin_page
-
-# Import system admin page with innocent name
-try:
-    from pages.report_analytics import show_analytics_page
-    ANALYTICS_AVAILABLE = True
-except ImportError:
-    ANALYTICS_AVAILABLE = False
+from pages import (
+    show_leaderboard_page,
+    show_activities_page, 
+    show_dashboard_page,
+    show_profile_page,
+    show_admin_page,
+    show_analytics_page
+)
 
 st.set_page_config(
     page_title="Konkurranseapp",
@@ -272,7 +268,7 @@ def show_main_app():
             st.error("Du har ikke tilgang til admin-området")
     elif page == 'report_analytics':
         # System admin analytics page - only accessible to system admins
-        if user.get('user_role') == 'system_admin' and ANALYTICS_AVAILABLE:
+        if user.get('user_role') == 'system_admin' and show_analytics_page:
             show_analytics_page(user)
         else:
             st.error("🚫 Ingen tilgang til avanserte rapporter")
