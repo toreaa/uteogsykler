@@ -140,13 +140,29 @@ def perform_login(email: str, password: str):
     try:
         supabase = get_supabase()
         
+        # Debug: Check if we can reach Supabase at all
+        st.write("🔍 **Debug info:**")
+        try:
+            # Test basic connection
+            test_response = supabase.table('activities').select('id').limit(1).execute()
+            st.write("✅ Database connection OK")
+        except Exception as conn_error:
+            st.error(f"❌ Database connection failed: {conn_error}")
+            return False
+        
+        st.write("🔐 Attempting login...")
+        
         # Attempt login
         response = supabase.auth.sign_in_with_password({
             "email": email,
             "password": password
         })
         
+        st.write(f"📤 Login response received: {response is not None}")
+        
         if response.user:
+            st.write("✅ Auth successful, getting user profile...")
+            
             # Get user profile from database
             db = get_db_helper()
             user_profile = db.get_user_by_id(response.user.id)
@@ -166,8 +182,7 @@ def perform_login(email: str, password: str):
                 
                 st.success(f"🎉 Velkommen tilbake, {user_profile['full_name']}!")
                 st.balloons()
-                # Move rerun outside the try-catch
-                return True  # Signal successful login
+                return True
             else:
                 st.error("❌ Brukerregistrering ikke fullført. Kontakt support.")
                 return False
@@ -179,23 +194,22 @@ def perform_login(email: str, password: str):
         error_msg = str(auth_error)
         st.error(f"❌ Pålogging feilet: {error_msg}")
         
-        # Handle specific error cases
-        if "not confirmed" in error_msg.lower():
-            st.warning("📧 E-posten din er ikke bekreftet ennå")
-            st.info("💡 Sjekk innboksen din og klikk på bekreftelseslenken")
+        # Show more debug info
+        st.write("🐛 **Error details:**")
+        st.code(error_msg)
+        
+        # Check if it's an API key issue during auth specifically
+        if "api key" in error_msg.lower():
+            st.warning("🔑 API Key problem detected")
             
-            # Offer to resend confirmation
-            if st.button("📤 Send ny bekreftelses-e-post"):
-                try:
-                    supabase.auth.resend(type="signup", email=email)
-                    st.success("✅ Ny bekreftelses-e-post sendt!")
-                except Exception as e:
-                    st.error(f"Kunne ikke sende e-post: {e}")
-                    
-        elif "invalid" in error_msg.lower():
-            st.info("💡 Sjekk at e-post og passord er riktig")
-        elif "too many" in error_msg.lower():
-            st.info("💡 For mange forsøk. Vent litt og prøv igjen")
+            # Test if we can read from database directly
+            try:
+                db = get_db_helper()
+                activities = db.get_active_activities()
+                st.write(f"✅ Direct database access works: Found {len(activities)} activities")
+                st.info("💡 API key works for database, problem might be with Auth service")
+            except Exception as db_error:
+                st.error(f"❌ Direct database also fails: {db_error}")
         
         return False
 
