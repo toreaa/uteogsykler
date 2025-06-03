@@ -20,6 +20,13 @@ from pages.dashboard import show_dashboard_page
 from pages.profile import show_profile_page
 from pages.admin import show_admin_page
 
+# Import system admin page with innocent name
+try:
+    from pages.report_analytics import show_analytics_page
+    ANALYTICS_AVAILABLE = True
+except ImportError:
+    ANALYTICS_AVAILABLE = False
+
 st.set_page_config(
     page_title="Konkurranseapp",
     page_icon="🏆",
@@ -151,7 +158,8 @@ def perform_login(email: str, password: str) -> bool:
                     'email': response.user.email,
                     'full_name': user_profile['full_name'],
                     'company_id': user_profile['company_id'],
-                    'is_admin': user_profile['is_admin']
+                    'is_admin': user_profile['is_admin'],
+                    'user_role': user_profile.get('user_role', 'user')
                 }
                 return True
         
@@ -258,10 +266,17 @@ def show_main_app():
     elif page == 'profile':
         show_profile_page(user)
     elif page == 'admin':
-        if user['is_admin']:
+        if user.get('user_role') in ['company_admin', 'system_admin']:
             show_admin_page(user)
         else:
             st.error("Du har ikke tilgang til admin-området")
+    elif page == 'report_analytics':
+        # System admin analytics page - only accessible to system admins
+        if user.get('user_role') == 'system_admin' and ANALYTICS_AVAILABLE:
+            show_analytics_page(user)
+        else:
+            st.error("🚫 Ingen tilgang til avanserte rapporter")
+            st.info("Kun system-administratorer har tilgang til denne siden")
 
 def show_sidebar(user):
     """Show sidebar navigation"""
@@ -272,8 +287,13 @@ def show_sidebar(user):
         # User info
         st.markdown("### 👤 Innlogget som:")
         st.write(f"**{user['full_name']}**")
-        if user['is_admin']:
-            st.write("👑 Administrator")
+        
+        # Show role
+        user_role = user.get('user_role', 'user')
+        if user_role == 'system_admin':
+            st.write("🔧 System Administrator")
+        elif user_role == 'company_admin':
+            st.write("👑 Bedrifts-administrator")
         else:
             st.write("👤 Bruker")
         
@@ -282,7 +302,7 @@ def show_sidebar(user):
         # Navigation
         st.markdown("### 📋 Meny")
         
-        # Navigation buttons
+        # Standard navigation buttons
         if st.button("🏠 Dashboard", use_container_width=True, 
                     type="primary" if st.session_state.current_page == 'dashboard' else "secondary"):
             st.session_state.current_page = 'dashboard'
@@ -303,8 +323,9 @@ def show_sidebar(user):
             st.session_state.current_page = 'profile'
             st.rerun()
         
-        if user['is_admin']:
-            if st.button("👑 Admin", use_container_width=True,
+        # Company admin button (for company_admin and system_admin)
+        if user_role in ['company_admin', 'system_admin']:
+            if st.button("👑 Bedrifts-admin", use_container_width=True,
                         type="primary" if st.session_state.current_page == 'admin' else "secondary"):
                 st.session_state.current_page = 'admin'
                 st.rerun()
