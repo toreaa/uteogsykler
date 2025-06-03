@@ -245,3 +245,20 @@ def show_progress_chart(user, db):
             for i, (month, point) in enumerate(zip(months, points)):
                 # Simple bar representation
                 bar_length = int((point / max_points) * 20) if max_points > 0 else 0
+                bar = "█" * bar_length + "░" * (20 - bar_length)
+                
+                # Mark current month
+                marker = "👈" if i == len(months) - 1 else ""
+                st.write(f"`{month:8}` {bar} {point:3d} poeng {marker}")
+        
+        # Show trend
+        if len(points) >= 2:
+            if points[-1] > points[-2]:
+                st.success("📈 Du er på vei oppover! Fortsett sånn!")
+            elif points[-1] < points[-2]:
+                st.warning("📉 Litt nedgang fra forrige måned. Du klarer å komme tilbake!")
+            else:
+                st.info("➡️ Samme nivå som forrige måned. Kanskje tid for å pushe litt ekstra?")
+        
+    except Exception as e:
+        st.error(f"Feil ved visning av utviklingsgraf: {e}")
