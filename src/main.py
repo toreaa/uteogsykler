@@ -345,6 +345,5 @@ def logout_user():
     st.session_state.current_page = 'dashboard'
     st.rerun()
 
-
 if __name__ == "__main__":
     main()
