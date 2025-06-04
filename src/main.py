@@ -99,40 +99,37 @@ def show_login_form():
             st.error("Fyll inn både e-post og passord")
 
 def show_registration_form():
-    """Registration form"""
+    """Registration form - only join existing companies"""
     st.markdown("### Opprett ny konto")
+    st.info("💡 **Du trenger en bedriftskode fra din arbeidsgiver for å registrere deg**")
     
     with st.form("main_registration_form"):
         col1, col2 = st.columns(2)
         
         with col1:
-            full_name = st.text_input("👤 Fullt navn")
-            email = st.text_input("📧 E-post")
+            full_name = st.text_input("👤 Fullt navn", placeholder="Ola Nordmann")
+            email = st.text_input("📧 E-post", placeholder="ola@bedrift.no")
         
         with col2:
-            password = st.text_input("🔒 Passord", type="password")
+            password = st.text_input("🔒 Passord", type="password", placeholder="Minst 6 tegn")
             password_confirm = st.text_input("🔒 Bekreft passord", type="password")
         
         st.markdown("**🏢 Bedriftstilknytning**")
         
-        company_option = st.radio(
-            "Hva vil du gjøre?",
-            ["🆕 Registrere min bedrift", "🤝 Bli med i eksisterende bedrift"]
-        )
+        company_code = st.text_input(
+            "🔑 Bedriftskode (6 tegn)", 
+            placeholder="AB12C3",
+            help="Skriv inn bedriftskoden du har fått fra din arbeidsgiver eller HR-avdeling",
+            max_chars=6
+        ).upper()
         
-        if company_option == "🆕 Registrere min bedrift":
-            company_name = st.text_input("🏢 Bedriftsnavn")
-            company_code = None
-        else:
-            company_name = None
-            company_code = st.text_input("🔑 Bedriftskode (6 tegn)").upper()
+        st.caption("📞 Kontakt din arbeidsgiver eller HR-avdeling for å få bedriftskoden")
         
         register_btn = st.form_submit_button("✨ Opprett konto", type="primary", use_container_width=True)
     
     if register_btn:
-        if perform_registration(full_name, email, password, password_confirm, 
-                              company_option, company_name, company_code):
-            st.success("Konto opprettet! Du kan nå logge inn.")
+        if perform_registration(full_name, email, password, password_confirm, company_code):
+            st.success("🎉 Konto opprettet! Du kan nå logge inn.")
 
 def perform_login(email: str, password: str) -> bool:
     """Handle login"""
@@ -166,11 +163,10 @@ def perform_login(email: str, password: str) -> bool:
         st.error(f"Pålogging feilet: {e}")
         return False
 
-def perform_registration(full_name: str, email: str, password: str, password_confirm: str,
-                        company_option: str, company_name: str = None, company_code: str = None) -> bool:
-    """Handle registration"""
+def perform_registration(full_name: str, email: str, password: str, password_confirm: str, company_code: str) -> bool:
+    """Handle registration - only join existing companies"""
     # Validation
-    if not all([full_name, email, password, password_confirm]):
+    if not all([full_name, email, password, password_confirm, company_code]):
         st.error("Fyll inn alle feltene")
         return False
     
@@ -182,49 +178,41 @@ def perform_registration(full_name: str, email: str, password: str, password_con
         st.error("Ugyldig e-postadresse")
         return False
     
+    if len(company_code) != 6 or not company_code.isalnum():
+        st.error("Bedriftskode må være 6 alfanumeriske tegn")
+        return False
+    
     try:
         supabase = get_supabase()
         db = get_db_helper()
         
-        # Handle company
-        target_company_id = None
-        is_admin = False
+        # Validate company code
+        company = db.get_company_by_code(company_code)
+        if not company:
+            st.error("❌ Ugyldig bedriftskode. Sjekk med din arbeidsgiver at koden er riktig.")
+            st.info("💡 Bedriftskoder er 6 tegn lange og består av bokstaver og tall")
+            return False
         
-        if company_option == "🆕 Registrere min bedrift":
-            if not company_name:
-                st.error("Skriv inn bedriftsnavn")
-                return False
-            
-            company = db.create_company(company_name)
-            target_company_id = company['id']
-            is_admin = True
-            st.info(f"Bedriftskode: **{company['company_code']}**")
-        else:
-            if not company_code:
-                st.error("Skriv inn bedriftskode")
-                return False
-            
-            company = db.get_company_by_code(company_code)
-            if not company:
-                st.error("Ugyldig bedriftskode")
-                return False
-            
-            target_company_id = company['id']
+        st.success(f"✅ Gyldig bedriftskode! Du blir med i: **{company['name']}**")
         
-        # Create user
+        # Create user account
         response = supabase.auth.sign_up({
             "email": email,
             "password": password
         })
         
         if response.user:
+            # Create user profile as regular user (not admin)
             db.create_user(
                 user_id=response.user.id,
                 email=email,
                 full_name=full_name,
-                company_id=target_company_id,
-                is_admin=is_admin
+                company_id=company['id'],
+                is_admin=False  # New users are always regular users
             )
+            
+            st.info(f"👤 Du er registrert som vanlig bruker i {company['name']}")
+            st.info("👑 Kontakt din bedrifts-administrator hvis du trenger admin-rettigheter")
             return True
         
         st.error("Kunne ikke opprette konto")
