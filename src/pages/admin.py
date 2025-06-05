@@ -12,6 +12,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.supabase_client import get_supabase
+from utils.database_helpers import get_db_helper
 
 
 def show_admin_page(user):
@@ -34,9 +35,10 @@ def show_admin_page(user):
     except:
         st.warning("Kunne ikke laste bedriftsinformasjon")
     
-    # Admin tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
+    # Admin tabs - OPPDATERT: Lagt til Aktiviteter-tab
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "👥 Brukere", 
+        "🏃 Aktiviteter",  # NY TAB
         "📊 Statistikk", 
         "🏆 Konkurranser",
         "⚙️ Innstillinger"
@@ -46,14 +48,415 @@ def show_admin_page(user):
         show_user_management(user)
     
     with tab2:
-        show_company_statistics(user)
+        show_activity_management(user)  # NY FUNKSJON
     
     with tab3:
-        show_competition_management(user)
+        show_company_statistics(user)
     
     with tab4:
+        show_competition_management(user)
+    
+    with tab5:
         show_admin_settings(user)
 
+
+# ============= NY FUNKSJON: AKTIVITETSADMINISTRASJON =============
+
+def show_activity_management(user):
+    """Activity management section for company admin"""
+    st.subheader("🏃 Aktivitetsadministrasjon")
+    
+    try:
+        db = get_db_helper()
+        
+        # Get all activities for this company
+        company_activities = db.get_active_activities(company_id=user['company_id'])
+        
+        # Summary stats
+        total_activities = len(company_activities)
+        global_activities = [a for a in company_activities if a.get('company_id') is None]
+        custom_activities = [a for a in company_activities if a.get('company_id') == user['company_id']]
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("🏃 Totale aktiviteter", total_activities)
+        with col2:
+            st.metric("🌐 Standard aktiviteter", len(global_activities))
+        with col3:
+            st.metric("🏢 Bedriftsspesifikke", len(custom_activities))
+        
+        st.markdown("---")
+        
+        # Action buttons
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("➕ Opprett ny aktivitet", type="primary", use_container_width=True):
+                st.session_state.show_create_activity = True
+        
+        with col2:
+            if st.button("📋 Kopier standardaktiviteter", use_container_width=True):
+                copy_standard_activities_to_company(user, db)
+        
+        with col3:
+            if st.button("🔄 Oppdater aktivitetsliste", use_container_width=True):
+                st.rerun()
+        
+        # Create new activity form
+        if st.session_state.get('show_create_activity', False):
+            show_create_activity_form(user, db)
+        
+        st.markdown("---")
+        
+        # Activities list with management options
+        st.markdown("### 📋 Aktivitetsliste")
+        
+        if not company_activities:
+            st.info("Ingen aktiviteter funnet for bedriften")
+            st.info("💡 Klikk 'Kopier standardaktiviteter' for å få de grunnleggende aktivitetene")
+            return
+        
+        # Display activities with edit options
+        for activity in company_activities:
+            with st.container():
+                show_activity_card(activity, user, db)
+                st.divider()
+        
+    except Exception as e:
+        st.error(f"Kunne ikke laste aktiviteter: {e}")
+
+
+def show_create_activity_form(user, db):
+    """Show form for creating new activity"""
+    with st.expander("➕ Opprett ny aktivitet", expanded=True):
+        with st.form("create_activity_form"):
+            st.markdown("### Ny bedriftsspesifikk aktivitet")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                activity_name = st.text_input("🏃 Aktivitetsnavn", placeholder="F.eks. Svømming")
+                activity_unit = st.selectbox("📏 Måleenhet", ["km", "timer", "repetisjoner", "poeng", "k steps"])
+            
+            with col2:
+                activity_description = st.text_area("📝 Beskrivelse", placeholder="Beskriv aktiviteten og hvordan den utføres")
+            
+            st.markdown("### 🎯 Poengskala")
+            st.info("💡 Definer 3 nivåer: Lavt, medium og høyt")
+            
+            # Simple 3-tier system
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("**Nivå 1 (Grunnleggende)**")
+                tier1_min = st.number_input("Fra", min_value=0.0, value=0.0, key="tier1_min")
+                tier1_max = st.number_input("Til", min_value=0.1, value=50.0, key="tier1_max")
+                tier1_points = st.number_input("Poeng", min_value=1, value=1, key="tier1_points")
+            
+            with col2:
+                st.markdown("**Nivå 2 (Middels)**")
+                tier2_min = st.number_input("Fra", min_value=0.1, value=50.0, key="tier2_min")
+                tier2_max = st.number_input("Til", min_value=0.1, value=100.0, key="tier2_max")
+                tier2_points = st.number_input("Poeng", min_value=1, value=2, key="tier2_points")
+            
+            with col3:
+                st.markdown("**Nivå 3 (Høyt)**")
+                tier3_min = st.number_input("Fra", min_value=0.1, value=100.0, key="tier3_min")
+                st.write("Til: ∞ (ubegrenset)")
+                tier3_points = st.number_input("Poeng", min_value=1, value=3, key="tier3_points")
+            
+            # Submit buttons
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("✅ Opprett aktivitet", type="primary", use_container_width=True)
+            with col2:
+                cancel = st.form_submit_button("❌ Avbryt", use_container_width=True)
+        
+        if cancel:
+            st.session_state.show_create_activity = False
+            st.rerun()
+        
+        if submitted:
+            create_new_activity(user, db, activity_name, activity_description, activity_unit, 
+                              tier1_min, tier1_max, tier1_points,
+                              tier2_min, tier2_max, tier2_points,
+                              tier3_min, tier3_points)
+
+
+def create_new_activity(user, db, name, description, unit, 
+                       t1_min, t1_max, t1_points, t2_min, t2_max, t2_points, t3_min, t3_points):
+    """Create new company-specific activity"""
+    try:
+        # Validate inputs
+        if not name or not description:
+            st.error("Navn og beskrivelse er påkrevd")
+            return
+        
+        # Build scoring tiers
+        scoring_tiers = {
+            "tiers": [
+                {"min": t1_min, "max": t1_max, "points": t1_points},
+                {"min": t2_min, "max": t2_max, "points": t2_points},
+                {"min": t3_min, "max": None, "points": t3_points}  # Top tier has no max
+            ]
+        }
+        
+        # Create activity
+        activity = db.create_activity(
+            name=name,
+            description=description,
+            unit=unit,
+            scoring_tiers=scoring_tiers,
+            company_id=user['company_id']
+        )
+        
+        st.success(f"✅ Aktivitet '{name}' ble opprettet!")
+        st.balloons()
+        
+        # Clear form and refresh
+        st.session_state.show_create_activity = False
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Feil ved opprettelse av aktivitet: {e}")
+
+
+def show_activity_card(activity, user, db):
+    """Display activity card with edit options"""
+    is_company_specific = activity.get('company_id') == user['company_id']
+    is_global = activity.get('company_id') is None
+    
+    col1, col2, col3 = st.columns([3, 1, 1])
+    
+    with col1:
+        # Activity name and type
+        activity_header = f"🏃 **{activity['name']}**"
+        if is_company_specific:
+            activity_header += " 🏢"
+        elif is_global:
+            activity_header += " 🌐"
+        
+        st.markdown(activity_header)
+        st.caption(f"📏 {activity['unit']} | {activity['description']}")
+        
+        # Show scoring tiers
+        scoring_tiers = activity['scoring_tiers']['tiers']
+        tier_text = " | ".join([
+            f"{tier['min']}-{tier.get('max', '∞')} = {tier['points']}p"
+            for tier in scoring_tiers
+        ])
+        st.caption(f"🎯 **Poengskala:** {tier_text}")
+    
+    with col2:
+        if is_global:
+            st.caption("🌐 Standard aktivitet")
+            st.caption("(Kan ikke redigeres)")
+        elif is_company_specific:
+            st.caption("🏢 Bedriftsspesifikk")
+            st.caption("(Kan redigeres)")
+    
+    with col3:
+        if is_company_specific:
+            # Edit and delete buttons for company-specific activities
+            edit_key = f"edit_{activity['id']}"
+            delete_key = f"delete_{activity['id']}"
+            
+            if st.button("✏️ Rediger", key=edit_key, help="Rediger aktivitet"):
+                st.session_state[f"editing_{activity['id']}"] = True
+                st.rerun()
+            
+            if st.button("🗑️ Slett", key=delete_key, help="Slett aktivitet"):
+                delete_activity(activity, user, db)
+        
+        elif is_global:
+            # Option to create company-specific copy
+            copy_key = f"copy_{activity['id']}"
+            if st.button("📋 Kopier", key=copy_key, help="Lag bedriftsspesifikk kopi"):
+                copy_global_activity_to_company(activity, user, db)
+    
+    # Show edit form if editing
+    if st.session_state.get(f"editing_{activity['id']}", False):
+        show_edit_activity_form(activity, user, db)
+
+
+def show_edit_activity_form(activity, user, db):
+    """Show form for editing existing activity"""
+    with st.expander(f"✏️ Rediger: {activity['name']}", expanded=True):
+        with st.form(f"edit_form_{activity['id']}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                new_name = st.text_input("Aktivitetsnavn", value=activity['name'])
+                new_unit = st.selectbox("Måleenhet", ["km", "timer", "repetisjoner", "poeng", "k steps"], 
+                                       index=["km", "timer", "repetisjoner", "poeng", "k steps"].index(activity['unit']) 
+                                       if activity['unit'] in ["km", "timer", "repetisjoner", "poeng", "k steps"] else 0)
+            
+            with col2:
+                new_description = st.text_area("Beskrivelse", value=activity['description'])
+            
+            # Edit scoring tiers
+            st.markdown("### 🎯 Rediger poengskala")
+            current_tiers = activity['scoring_tiers']['tiers']
+            
+            col1, col2, col3 = st.columns(3)
+            
+            # Tier 1
+            with col1:
+                st.markdown("**Nivå 1**")
+                new_t1_min = st.number_input("Fra", value=float(current_tiers[0]['min']), key=f"edit_t1_min_{activity['id']}")
+                new_t1_max = st.number_input("Til", value=float(current_tiers[0]['max']) if current_tiers[0]['max'] else 50.0, key=f"edit_t1_max_{activity['id']}")
+                new_t1_points = st.number_input("Poeng", value=current_tiers[0]['points'], key=f"edit_t1_points_{activity['id']}")
+            
+            # Tier 2
+            with col2:
+                st.markdown("**Nivå 2**")
+                new_t2_min = st.number_input("Fra", value=float(current_tiers[1]['min']), key=f"edit_t2_min_{activity['id']}")
+                new_t2_max = st.number_input("Til", value=float(current_tiers[1]['max']) if current_tiers[1]['max'] else 100.0, key=f"edit_t2_max_{activity['id']}")
+                new_t2_points = st.number_input("Poeng", value=current_tiers[1]['points'], key=f"edit_t2_points_{activity['id']}")
+            
+            # Tier 3
+            with col3:
+                st.markdown("**Nivå 3**")
+                new_t3_min = st.number_input("Fra", value=float(current_tiers[2]['min']), key=f"edit_t3_min_{activity['id']}")
+                st.write("Til: ∞")
+                new_t3_points = st.number_input("Poeng", value=current_tiers[2]['points'], key=f"edit_t3_points_{activity['id']}")
+            
+            # Submit buttons
+            col1, col2 = st.columns(2)
+            with col1:
+                save_changes = st.form_submit_button("💾 Lagre endringer", type="primary", use_container_width=True)
+            with col2:
+                cancel_edit = st.form_submit_button("❌ Avbryt", use_container_width=True)
+        
+        if cancel_edit:
+            st.session_state[f"editing_{activity['id']}"] = False
+            st.rerun()
+        
+        if save_changes:
+            update_activity(activity, user, db, new_name, new_description, new_unit,
+                          new_t1_min, new_t1_max, new_t1_points,
+                          new_t2_min, new_t2_max, new_t2_points,
+                          new_t3_min, new_t3_points)
+
+
+def update_activity(activity, user, db, name, description, unit,
+                   t1_min, t1_max, t1_points, t2_min, t2_max, t2_points, t3_min, t3_points):
+    """Update existing activity"""
+    try:
+        # Check permissions
+        if not db.can_user_modify_activity(user['company_id'], activity['id']):
+            st.error("Du har ikke tilgang til å redigere denne aktiviteten")
+            return
+        
+        # Build new scoring tiers
+        scoring_tiers = {
+            "tiers": [
+                {"min": t1_min, "max": t1_max, "points": t1_points},
+                {"min": t2_min, "max": t2_max, "points": t2_points},
+                {"min": t3_min, "max": None, "points": t3_points}
+            ]
+        }
+        
+        # Update activity
+        updates = {
+            'name': name,
+            'description': description,
+            'unit': unit,
+            'scoring_tiers': scoring_tiers
+        }
+        
+        db.update_activity(activity['id'], updates)
+        
+        st.success(f"✅ Aktivitet '{name}' ble oppdatert!")
+        
+        # Clear edit state and refresh
+        st.session_state[f"editing_{activity['id']}"] = False
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Feil ved oppdatering: {e}")
+
+
+def delete_activity(activity, user, db):
+    """Delete (deactivate) activity"""
+    try:
+        # Check permissions
+        if not db.can_user_modify_activity(user['company_id'], activity['id']):
+            st.error("Du har ikke tilgang til å slette denne aktiviteten")
+            return
+        
+        # Confirm deletion
+        if st.button(f"⚠️ Bekreft sletting av '{activity['name']}'", 
+                     key=f"confirm_delete_{activity['id']}", 
+                     type="secondary"):
+            
+            db.delete_activity(activity['id'])
+            st.success(f"✅ Aktivitet '{activity['name']}' ble slettet")
+            st.rerun()
+        
+    except Exception as e:
+        st.error(f"Feil ved sletting: {e}")
+
+
+def copy_global_activity_to_company(activity, user, db):
+    """Create company-specific copy of global activity"""
+    try:
+        # Create new activity based on global one
+        new_activity = db.create_activity(
+            name=f"{activity['name']} (Tilpasset)",
+            description=f"Bedriftsspesifikk versjon av {activity['description']}",
+            unit=activity['unit'],
+            scoring_tiers=activity['scoring_tiers'],
+            company_id=user['company_id']
+        )
+        
+        st.success(f"✅ Opprettet bedriftsspesifikk kopi av '{activity['name']}'")
+        st.info("💡 Du kan nå redigere denne kopien uavhengig av den opprinnelige aktiviteten")
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Feil ved kopiering: {e}")
+
+
+def copy_standard_activities_to_company(user, db):
+    """Copy all standard activities to company if they don't exist"""
+    try:
+        # Get global activities
+        global_activities = db.get_active_activities()  # Without company_id
+        
+        # Get existing company activities
+        company_activities = db.get_active_activities(company_id=user['company_id'])
+        existing_names = [a['name'] for a in company_activities]
+        
+        copied_count = 0
+        
+        for global_activity in global_activities:
+            # Skip if company already has this activity
+            if global_activity['name'] in existing_names:
+                continue
+            
+            # Copy to company
+            db.create_activity(
+                name=global_activity['name'],
+                description=global_activity['description'],
+                unit=global_activity['unit'],
+                scoring_tiers=global_activity['scoring_tiers'],
+                company_id=user['company_id']
+            )
+            copied_count += 1
+        
+        if copied_count > 0:
+            st.success(f"✅ Kopierte {copied_count} standardaktiviteter til bedriften")
+            st.balloons()
+            st.rerun()
+        else:
+            st.info("ℹ️ Alle standardaktiviteter finnes allerede i bedriften")
+        
+    except Exception as e:
+        st.error(f"Feil ved kopiering av standardaktiviteter: {e}")
+
+
+# ============= EKSISTERENDE FUNKSJONER (Uendret) =============
 
 def show_user_management(user):
     """User management section"""
@@ -260,11 +663,6 @@ def show_company_code_section(user):
                 
     except Exception as e:
         st.error(f"Kunne ikke laste bedriftsinformasjon: {e}")
-
-
-# Remove these functions since company admin can't generate new codes anymore:
-# - show_generate_new_code_section()
-# - generate_new_company_code()
 
 
 def show_company_statistics(user):
@@ -547,8 +945,9 @@ def show_admin_settings(user):
         # Activity overview (read-only)
         st.markdown("### 🏃 Aktivitetsoversikt")
         
-        activities_response = supabase.table('activities').select('*').eq('is_active', True).order('name').execute()
-        activities = activities_response.data or []
+        # Get company activities
+        db = get_db_helper()
+        activities = db.get_active_activities(company_id=user['company_id'])
         
         st.write("**Tilgjengelige aktiviteter for dine ansatte:**")
         
@@ -557,12 +956,20 @@ def show_admin_settings(user):
             for activity in activities:
                 scoring_tiers = activity['scoring_tiers']['tiers']
                 max_points = max(tier['points'] for tier in scoring_tiers)
-                activity_summary.append(f"• **{activity['name']}** ({activity['unit']}) - maks {max_points} poeng")
+                
+                activity_type = ""
+                if activity.get('company_id') == user['company_id']:
+                    activity_type = " 🏢"
+                elif activity.get('company_id') is None:
+                    activity_type = " 🌐"
+                
+                activity_summary.append(f"• **{activity['name']}**{activity_type} ({activity['unit']}) - maks {max_points} poeng")
             
             for summary in activity_summary:
                 st.write(summary)
         else:
             st.info("Ingen aktiviteter tilgjengelig")
+            st.info("💡 Gå til 'Aktiviteter'-fanen for å legge til aktiviteter")
         
         st.markdown("---")
         
