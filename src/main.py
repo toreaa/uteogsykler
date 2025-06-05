@@ -20,7 +20,6 @@ from pages import (
     show_dashboard_page,
     show_profile_page,
     show_admin_page,
-    show_admin_activities_page,
     show_analytics_page
 )
 
@@ -255,11 +254,6 @@ def show_main_app():
             show_admin_page(user)
         else:
             st.error("Du har ikke tilgang til admin-området")
-    elif page == 'admin_activities':
-        if user.get('user_role') in ['company_admin', 'system_admin']:
-            show_admin_activities_page(user)
-        else:
-            st.error("Du har ikke tilgang til aktivitetsstyring")
     elif page == 'report_analytics':
         # System admin analytics page - only accessible to system admins
         if user.get('user_role') == 'system_admin' and show_analytics_page:
@@ -318,11 +312,6 @@ def show_sidebar(user):
             if st.button("👑 Bedrifts-admin", use_container_width=True,
                         type="primary" if st.session_state.current_page == 'admin' else "secondary"):
                 st.session_state.current_page = 'admin'
-                st.rerun()
-                
-            if st.button("🏃 Aktivitetsstyring", use_container_width=True,
-                        type="primary" if st.session_state.current_page == 'admin_activities' else "secondary"):
-                st.session_state.current_page = 'admin_activities'
                 st.rerun()
         
         st.markdown("---")
