@@ -19,14 +19,8 @@ def show_activities_page(user):
     """Activities page - register and manage activities"""
     st.title("🏃 Aktivitetsregistrering")
     
-    # Tabs for current month vs history
-    tab1, tab2 = st.tabs(["📝 Denne måneden", "📈 Historikk"])
-    
-    with tab1:
-        show_current_month_activities(user)
-    
-    with tab2:
-        show_activity_history(user)
+    # Only show current month for now
+    show_current_month_activities(user)
 
 
 def show_current_month_activities(user):
@@ -368,3 +362,7 @@ def show_current_registrations(user, competition, user_entries, db):
     else:
         st.info("Du har ikke registrert noen aktiviteter ennå denne måneden")
         st.markdown("👆 Bruk skjemaet over for å registrere dine aktiviteter!")
+
+
+# Import functions that are used from database_helpers
+from utils.database_helpers import get_activity_name, get_activity_unit
