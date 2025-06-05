@@ -42,11 +42,15 @@ def show_current_month_activities(user):
         month_name = current_month.strftime("%B %Y")
         st.info(f"📅 **Registrerer for:** {month_name}")
         
-        # Get available activities
-        activities = db.get_active_activities()
+        # Get available activities - ENDRET: Pass company_id for å få bedriftsspesifikke aktiviteter
+        activities = db.get_active_activities(company_id=user['company_id'])
         
         if not activities:
             st.error("Ingen aktiviteter tilgjengelig")
+            if user.get('is_admin'):
+                st.info("💡 Gå til 'Aktivitetsstyring' for å legge til aktiviteter for bedriften")
+            else:
+                st.info("💡 Be administrator om å legge til aktiviteter for bedriften")
             return
         
         # Get user's existing entries for this month
@@ -63,20 +67,47 @@ def show_current_month_activities(user):
         st.subheader("➕ Legg til ny aktivitet")
         st.info("💡 **Tips:** Verdiene du legger inn blir **lagt til** dine eksisterende totaler for måneden")
         
-        # Activity selector dropdown
+        # Categorize activities - NYTT: Vis globale vs bedriftsspesifikke
+        global_activities = [a for a in activities if a.get('company_id') is None]
+        company_activities = [a for a in activities if a.get('company_id') == user['company_id']]
+        
+        # Activity selector dropdown with categories
         activities_dict = {activity['id']: activity for activity in activities}
-        activity_options = [f"{activity['name']} ({activity['unit']})" for activity in activities]
+        activity_options = []
+        
+        # Add global activities
+        if global_activities:
+            for activity in global_activities:
+                activity_options.append(f"{activity['name']} ({activity['unit']})")
+        
+        # Add company-specific activities
+        if company_activities:
+            if global_activities:  # Add separator only if we have both types
+                activity_options.append("--- Bedriftens egne aktiviteter ---")
+            for activity in company_activities:
+                activity_options.append(f"{activity['name']} ({activity['unit']}) 🏢")
+        
+        # Filter out category headers for selection
+        selectable_options = [opt for opt in activity_options if not opt.startswith("---")]
+        
+        if not selectable_options:
+            st.error("Ingen aktiviteter tilgjengelig")
+            return
         
         selected_activity_display = st.selectbox(
             "🏃 Velg aktivitet å registrere:",
-            activity_options,
+            selectable_options,
             help="Velg hvilken aktivitet du vil legge til data for"
         )
         
         # Find selected activity
         selected_activity = None
         for activity in activities:
-            if f"{activity['name']} ({activity['unit']})" == selected_activity_display:
+            activity_display = f"{activity['name']} ({activity['unit']})"
+            if activity.get('company_id') == user['company_id']:
+                activity_display += " 🏢"
+            
+            if activity_display == selected_activity_display:
                 selected_activity = activity
                 break
         
@@ -85,10 +116,20 @@ def show_current_month_activities(user):
             activity_name = selected_activity['name']
             activity_unit = selected_activity['unit']
             activity_description = selected_activity['description']
+            is_company_specific = selected_activity.get('company_id') == user['company_id']
             
             # Show selected activity details
             with st.container():
-                st.markdown(f"### {activity_name}")
+                header = f"### {activity_name}"
+                if is_company_specific:
+                    header += " 🏢"
+                st.markdown(header)
+                
+                if is_company_specific:
+                    st.caption("🏢 Bedriftsspesifikk aktivitet")
+                else:
+                    st.caption("🌐 Standard aktivitet")
+                
                 st.caption(activity_description)
                 
                 # Show scoring tiers
@@ -279,11 +320,15 @@ def show_current_registrations(user, competition, user_entries, db):
             activity = entry.get('activities', {})
             activity_name = activity.get('name', 'Ukjent')
             activity_unit = activity.get('unit', '')
+            is_company_specific = activity.get('company_id') == user['company_id']
             
             col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
             
             with col1:
-                st.write(f"🏃 {activity_name}")
+                display_name = f"🏃 {activity_name}"
+                if is_company_specific:
+                    display_name += " 🏢"
+                st.write(display_name)
             with col2:
                 st.write(f"{entry['value']} {activity_unit}")
             with col3:
@@ -323,60 +368,3 @@ def show_current_registrations(user, competition, user_entries, db):
     else:
         st.info("Du har ikke registrert noen aktiviteter ennå denne måneden")
         st.markdown("👆 Bruk skjemaet over for å registrere dine aktiviteter!")
-
-
-def show_activity_history(user):
-    """Show activity history for previous months"""
-    st.subheader("📈 Aktivitetshistorikk")
-    
-    try:
-        db = get_db_helper()
-        competitions = db.get_competitions_for_company(user['company_id'], limit=6)
-        
-        if len(competitions) <= 1:
-            st.info("Ingen historiske data ennå")
-            return
-        
-        # Skip current month (first in list)
-        historical_competitions = competitions[1:]
-        
-        for competition in historical_competitions:
-            month_date = datetime.strptime(competition['year_month'], '%Y-%m-%d').date()
-            month_name = month_date.strftime("%B %Y")
-            
-            with st.expander(f"📅 {month_name}"):
-                entries = db.get_user_entries_for_competition(user['id'], competition['id'])
-                
-                if entries:
-                    total_points = sum(entry['points'] for entry in entries)
-                    st.metric("Totale poeng", total_points)
-                    
-                    for entry in entries:
-                        activity = entry.get('activities', {})
-                        activity_name = activity.get('name', 'Ukjent')
-                        activity_unit = activity.get('unit', '')
-                        
-                        st.write(f"• **{activity_name}:** {entry['value']} {activity_unit} ({entry['points']} poeng)")
-                else:
-                    st.write("Ingen aktiviteter registrert denne måneden")
-                    
-    except Exception as e:
-        st.error(f"Kunne ikke laste historikk: {e}")
-
-
-def get_activity_name(activity_id: str, db) -> str:
-    """Get activity name by ID"""
-    try:
-        activity = db.get_activity_by_id(activity_id)
-        return activity['name'] if activity else 'Ukjent aktivitet'
-    except:
-        return 'Ukjent aktivitet'
-
-
-def get_activity_unit(activity_id: str, db) -> str:
-    """Get activity unit by ID"""
-    try:
-        activity = db.get_activity_by_id(activity_id)
-        return activity['unit'] if activity else ''
-    except:
-        return ''
