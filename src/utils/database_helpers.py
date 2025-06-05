@@ -26,7 +26,7 @@ class DatabaseHelper:
     
     def create_company(self, name: str) -> Dict[str, Any]:
         """
-        Opprett ny bedrift med auto-generert bedriftskode
+        Opprett ny bedrift med auto-generert bedriftskode og standard aktiviteter
         
         Args:
             name: Bedriftsnavn
@@ -57,10 +57,44 @@ class DatabaseHelper:
             if not response.data:
                 raise DatabaseError("Kunne ikke opprette bedrift")
             
-            return response.data[0]
+            company = response.data[0]
+            
+            # Kopier standard aktiviteter til den nye bedriften
+            self._copy_global_activities_to_company(company['id'])
+            
+            return company
             
         except Exception as e:
             raise DatabaseError(f"Feil ved opprettelse av bedrift: {e}")
+    
+    def _copy_global_activities_to_company(self, company_id: str) -> None:
+        """
+        Privat metode: Kopier globale standard aktiviteter til ny bedrift
+        
+        Args:
+            company_id: ID for bedriften som skal få aktivitetene
+        """
+        try:
+            # Hent globale aktiviteter (company_id = NULL)
+            response = self.supabase.table('activities').select('*').is_('company_id', 'null').eq('is_active', True).execute()
+            
+            global_activities = response.data or []
+            
+            # Kopier hver aktivitet til bedriften
+            for activity in global_activities:
+                company_activity_data = {
+                    'name': activity['name'],
+                    'description': activity['description'],
+                    'unit': activity['unit'],
+                    'scoring_tiers': activity['scoring_tiers'],
+                    'company_id': company_id,
+                    'is_active': True
+                }
+                
+                self.supabase.table('activities').insert(company_activity_data).execute()
+                
+        except Exception as e:
+            raise DatabaseError(f"Feil ved kopiering av standard aktiviteter: {e}")
     
     def get_company_by_code(self, company_code: str) -> Optional[Dict[str, Any]]:
         """
@@ -94,6 +128,29 @@ class DatabaseHelper:
         except Exception as e:
             raise DatabaseError(f"Feil ved henting av bedrift: {e}")
     
+    def get_all_companies(self) -> List[Dict[str, Any]]:
+        """Hent alle bedrifter (for system admin)"""
+        try:
+            response = self.supabase.table('companies').select('*').order('created_at', desc=True).execute()
+            
+            return response.data or []
+            
+        except Exception as e:
+            raise DatabaseError(f"Feil ved henting av alle bedrifter: {e}")
+    
+    def update_company(self, company_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Oppdater bedrift (for system admin)"""
+        try:
+            response = self.supabase.table('companies').update(updates).eq('id', company_id).execute()
+            
+            if not response.data:
+                raise DatabaseError("Kunne ikke oppdatere bedrift")
+            
+            return response.data[0]
+            
+        except Exception as e:
+            raise DatabaseError(f"Feil ved oppdatering av bedrift: {e}")
+    
     # ============= USER OPERATIONS =============
     
     def create_user(self, user_id: str, email: str, full_name: str, 
@@ -117,7 +174,8 @@ class DatabaseHelper:
                 'email': email,
                 'full_name': full_name,
                 'company_id': company_id,
-                'is_admin': is_admin
+                'is_admin': is_admin,
+                'user_role': 'company_admin' if is_admin else 'user'
             }
             
             response = self.supabase.table('users').insert(user_data).execute()
@@ -155,7 +213,11 @@ class DatabaseHelper:
     def update_user_admin_status(self, user_id: str, is_admin: bool) -> bool:
         """Oppdater admin-status for bruker"""
         try:
-            response = self.supabase.table('users').update({'is_admin': is_admin}).eq('id', user_id).execute()
+            user_role = 'company_admin' if is_admin else 'user'
+            response = self.supabase.table('users').update({
+                'is_admin': is_admin,
+                'user_role': user_role
+            }).eq('id', user_id).execute()
             
             return len(response.data) > 0
             
@@ -164,10 +226,24 @@ class DatabaseHelper:
     
     # ============= ACTIVITY OPERATIONS =============
     
-    def get_active_activities(self) -> List[Dict[str, Any]]:
-        """Hent alle aktive aktiviteter"""
+    def get_active_activities(self, company_id: str = None) -> List[Dict[str, Any]]:
+        """
+        Hent aktiviteter - hvis company_id er oppgitt, hent bedriftsspesifikke aktiviteter
+        Ellers hent globale aktiviteter
+        
+        Args:
+            company_id: Bedrift-ID (optional)
+            
+        Returns:
+            Liste med aktiviteter
+        """
         try:
-            response = self.supabase.table('activities').select('*').eq('is_active', True).execute()
+            if company_id:
+                # Hent bedriftsspesifikke aktiviteter
+                response = self.supabase.table('activities').select('*').eq('company_id', company_id).eq('is_active', True).order('name').execute()
+            else:
+                # Hent globale aktiviteter
+                response = self.supabase.table('activities').select('*').is_('company_id', 'null').eq('is_active', True).order('name').execute()
             
             return response.data or []
             
@@ -185,6 +261,104 @@ class DatabaseHelper:
             
         except Exception as e:
             raise DatabaseError(f"Feil ved henting av aktivitet: {e}")
+    
+    def create_activity(self, name: str, description: str, unit: str, 
+                       scoring_tiers: Dict[str, Any], company_id: str = None) -> Dict[str, Any]:
+        """
+        Opprett ny aktivitet
+        
+        Args:
+            name: Aktivitetsnavn
+            description: Beskrivelse
+            unit: Måleenhet (km, k steps, etc.)
+            scoring_tiers: Poengskala som JSON
+            company_id: Bedrift-ID (None for globale aktiviteter)
+            
+        Returns:
+            Opprettet aktivitet
+        """
+        try:
+            activity_data = {
+                'name': name,
+                'description': description,
+                'unit': unit,
+                'scoring_tiers': scoring_tiers,
+                'company_id': company_id,
+                'is_active': True
+            }
+            
+            response = self.supabase.table('activities').insert(activity_data).execute()
+            
+            if not response.data:
+                raise DatabaseError("Kunne ikke opprette aktivitet")
+            
+            return response.data[0]
+            
+        except Exception as e:
+            raise DatabaseError(f"Feil ved opprettelse av aktivitet: {e}")
+    
+    def update_activity(self, activity_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Oppdater aktivitet
+        
+        Args:
+            activity_id: Aktivitet-ID
+            updates: Felt som skal oppdateres
+            
+        Returns:
+            Oppdatert aktivitet
+        """
+        try:
+            response = self.supabase.table('activities').update(updates).eq('id', activity_id).execute()
+            
+            if not response.data:
+                raise DatabaseError("Kunne ikke oppdatere aktivitet")
+            
+            return response.data[0]
+            
+        except Exception as e:
+            raise DatabaseError(f"Feil ved oppdatering av aktivitet: {e}")
+    
+    def delete_activity(self, activity_id: str) -> bool:
+        """
+        Slett aktivitet (setter is_active = False)
+        
+        Args:
+            activity_id: Aktivitet-ID
+            
+        Returns:
+            True hvis vellykket
+        """
+        try:
+            response = self.supabase.table('activities').update({'is_active': False}).eq('id', activity_id).execute()
+            
+            return len(response.data) > 0
+            
+        except Exception as e:
+            raise DatabaseError(f"Feil ved sletting av aktivitet: {e}")
+    
+    def can_user_modify_activity(self, user_company_id: str, activity_id: str) -> bool:
+        """
+        Sjekk om bruker kan modifisere en aktivitet
+        
+        Args:
+            user_company_id: Brukerens bedrift-ID
+            activity_id: Aktivitet-ID
+            
+        Returns:
+            True hvis brukeren kan modifisere aktiviteten
+        """
+        try:
+            activity = self.get_activity_by_id(activity_id)
+            
+            if not activity:
+                return False
+            
+            # Kan kun modifisere aktiviteter som tilhører egen bedrift
+            return activity.get('company_id') == user_company_id
+            
+        except Exception as e:
+            return False
     
     def calculate_points_for_activity(self, activity_id: str, value: float) -> int:
         """
@@ -369,6 +543,44 @@ class DatabaseHelper:
             
         except Exception as e:
             raise DatabaseError(f"Feil ved henting av leaderboard: {e}")
+    
+    # ============= SYSTEM ADMIN OPERATIONS =============
+    
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        """Hent alle brukere (for system admin)"""
+        try:
+            response = self.supabase.table('users').select('*, companies(name, company_code)').order('created_at', desc=True).execute()
+            
+            return response.data or []
+            
+        except Exception as e:
+            raise DatabaseError(f"Feil ved henting av alle brukere: {e}")
+    
+    def get_system_stats(self) -> Dict[str, Any]:
+        """Hent systemstatistikk (for system admin)"""
+        try:
+            # Hent antall bedrifter
+            companies_response = self.supabase.table('companies').select('id').execute()
+            total_companies = len(companies_response.data or [])
+            
+            # Hent antall brukere
+            users_response = self.supabase.table('users').select('id').execute()
+            total_users = len(users_response.data or [])
+            
+            # Hent antall aktive konkurranser denne måneden
+            current_month = date.today().replace(day=1)
+            competitions_response = self.supabase.table('monthly_competitions').select('id').eq('year_month', current_month.isoformat()).execute()
+            active_competitions = len(competitions_response.data or [])
+            
+            return {
+                'total_companies': total_companies,
+                'total_users': total_users,
+                'active_competitions': active_competitions,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            raise DatabaseError(f"Feil ved henting av systemstatistikk: {e}")
 
 
 # Global helper instance
@@ -382,3 +594,16 @@ def get_db_helper() -> DatabaseHelper:
         _db_helper = DatabaseHelper()
     
     return _db_helper
+
+
+# Convenience functions for getting activity names/units (used in activities.py)
+def get_activity_name(activity_id: str, db: DatabaseHelper) -> str:
+    """Hent aktivitetsnavn basert på ID"""
+    activity = db.get_activity_by_id(activity_id)
+    return activity['name'] if activity else 'Ukjent aktivitet'
+
+
+def get_activity_unit(activity_id: str, db: DatabaseHelper) -> str:
+    """Hent aktivitetsenhet basert på ID"""
+    activity = db.get_activity_by_id(activity_id)
+    return activity['unit'] if activity else ''
