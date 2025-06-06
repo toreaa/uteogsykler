@@ -30,6 +30,74 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# SKJUL STREAMLIT SIN EGEN NAVIGASJON
+st.markdown("""
+    <style>
+    /* Skjul Streamlit sin øverste navigasjon */
+    [data-testid="stAppViewContainer"] > .main > div > div > div > div.stAppViewBlockContainer > div > section > div > div:first-child {
+        display: none;
+    }
+    
+    /* Skjul multipage navigasjon */
+    .stSelectbox > div > div > div {
+        display: none;
+    }
+    
+    /* Skjul page selector */
+    .stSelectbox[data-baseweb="select"] {
+        display: none;
+    }
+    
+    /* Skjul hovedmeny */
+    #MainMenu {
+        visibility: hidden;
+    }
+    
+    /* Skjul Streamlit header og footer */
+    header[data-testid="stHeader"] {
+        display: none;
+    }
+    
+    footer {
+        visibility: hidden;
+    }
+    
+    /* Skjul "Made with Streamlit" */
+    .viewerBadge_container__1QSob {
+        display: none;
+    }
+    
+    /* Skjul eventuell page navigation */
+    [data-testid="stSidebarNav"] {
+        display: none;
+    }
+    
+    /* Skjul page selector i sidebar */
+    .stSelectbox {
+        display: none;
+    }
+    
+    /* Alternative selectors for hiding navigation */
+    div[data-testid="stSidebarNav"] {
+        display: none;
+    }
+    
+    ul[data-testid="stSidebarNavItems"] {
+        display: none;
+    }
+    
+    /* Fjern navigation fra toppen */
+    .css-18ni7ap {
+        display: none;
+    }
+    
+    /* Streamlit multipage navigation */
+    section[data-testid="stSidebar"] > div > div:first-child {
+        display: none;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 def main():
     """Main application entry point"""
     # Initialize session state
