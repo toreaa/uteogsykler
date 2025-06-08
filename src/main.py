@@ -72,8 +72,8 @@ st.markdown("""
         display: none;
     }
     
-    /* Skjul page selector i sidebar */
-    .stSelectbox {
+    /* FIKSET: Kun skjul sidebar page selector, ikke alle selectboxer */
+    [data-testid="stSidebarNav"] .stSelectbox {
         display: none;
     }
     
