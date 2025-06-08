@@ -151,36 +151,7 @@ def show_current_month_activities(user):
                 elif submitted and new_value == 0:
                     st.warning("Skriv inn en verdi større enn 0")
         
-        # Show alternative: Reset/Edit existing
-        if user_entries:
-            st.markdown("---")
-            st.subheader("✏️ Rediger eksisterende verdier")
-            
-            with st.expander("🔧 Endre totaler direkte"):
-                st.warning("⚠️ Dette vil **overskrive** dine eksisterende totaler")
-                
-                with st.form("edit_totals_form"):
-                    edit_values = {}
-                    
-                    for activity in activities:
-                        activity_id = activity['id']
-                        if activity_id in user_entries_dict:
-                            activity_name = activity['name']
-                            activity_unit = activity['unit']
-                            current_total = float(user_entries_dict[activity_id]['value'])
-                            
-                            edit_values[activity_id] = st.number_input(
-                                f"Total {activity_name} ({activity_unit})",
-                                min_value=0.0,
-                                value=current_total,
-                                step=1.0 if activity_unit == 'k steps' else 0.1,
-                                key=f"edit_activity_{activity_id}"
-                            )
-                    
-                    edit_submitted = st.form_submit_button("💾 Oppdater totaler", type="secondary")
-                
-                if edit_submitted:
-                    update_activities(user, competition, edit_values, db)
+        # Only admin can edit existing values - removed from user interface
         
     except Exception as e:
         st.error(f"Feil ved lasting av aktiviteter: {e}")
