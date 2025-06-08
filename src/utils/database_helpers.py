@@ -224,25 +224,24 @@ class DatabaseHelper:
         except Exception as e:
             raise DatabaseError(f"Feil ved oppdatering av admin-status: {e}")
     
-    # ============= ACTIVITY OPERATIONS =============
+    # ============= ACTIVITY OPERATIONS (FIKSET) =============
     
     def get_active_activities(self, company_id: str = None) -> List[Dict[str, Any]]:
         """
-        Hent aktiviteter - hvis company_id er oppgitt, hent bedriftsspesifikke aktiviteter
-        Ellers hent globale aktiviteter
+        FIKSET: Hent alle aktive aktiviteter for en bedrift
         
         Args:
-            company_id: Bedrift-ID (optional)
+            company_id: Bedrift-ID - hvis oppgitt, hent kun aktiviteter for den bedriften
             
         Returns:
             Liste med aktiviteter
         """
         try:
             if company_id:
-                # Hent bedriftsspesifikke aktiviteter
+                # FIKSET: Hent kun bedriftsspesifikke aktiviteter (ikke globale + bedriftsspesifikke)
                 response = self.supabase.table('activities').select('*').eq('company_id', company_id).eq('is_active', True).order('name').execute()
             else:
-                # Hent globale aktiviteter
+                # Hent globale aktiviteter (for kopiering til nye bedrifter)
                 response = self.supabase.table('activities').select('*').is_('company_id', 'null').eq('is_active', True).order('name').execute()
             
             return response.data or []
