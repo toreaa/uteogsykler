@@ -18,8 +18,6 @@ from utils.supabase_client import get_supabase
 def show_activities_page(user):
     """Activities page - register and manage activities"""
     st.title("🏃 Aktivitetsregistrering")
-    
-    # Only show current month for now
     show_current_month_activities(user)
 
 
@@ -36,15 +34,11 @@ def show_current_month_activities(user):
         month_name = current_month.strftime("%B %Y")
         st.info(f"📅 **Registrerer for:** {month_name}")
         
-        # Get available activities - Pass company_id for å få bedriftsspesifikke aktiviteter
+        # Get available activities
         activities = db.get_active_activities(company_id=user['company_id'])
         
         if not activities:
             st.error("Ingen aktiviteter tilgjengelig")
-            if user.get('is_admin'):
-                st.info("💡 Gå til 'Aktivitetsstyring' for å legge til aktiviteter for bedriften")
-            else:
-                st.info("💡 Be administrator om å legge til aktiviteter for bedriften")
             return
         
         # Get user's existing entries for this month
@@ -57,101 +51,85 @@ def show_current_month_activities(user):
             show_current_registrations(user, competition, user_entries, db)
             st.markdown("---")
         
-        # Show activity registration forms
+        # Activity registration section
         st.subheader("➕ Legg til ny aktivitet")
         st.info("💡 **Tips:** Verdiene du legger inn blir **lagt til** dine eksisterende totaler for måneden")
         
-        # Build simple dropdown options - one option per activity
+        # Create dropdown options
         activity_options = []
-        activities_dict = {}
+        activity_mapping = {}
         
         for activity in activities:
-            # Create display name
             display_name = f"{activity['name']} ({activity['unit']})"
             if activity.get('company_id') == user['company_id']:
                 display_name += " 🏢"
             
             activity_options.append(display_name)
-            activities_dict[display_name] = activity
+            activity_mapping[display_name] = activity
         
-        # Show activity selector dropdown
-        if len(activity_options) > 1:
-            selected_activity_display = st.selectbox(
-                "🏃 Velg aktivitet å registrere:",
-                activity_options,
-                index=0,
-                help="Velg hvilken aktivitet du vil legge til data for"
-            )
+        # Show dropdown to select activity
+        selected_activity_name = st.selectbox(
+            "Velg aktivitet:",
+            activity_options,
+            key="activity_selector"
+        )
+        
+        # Get the selected activity object
+        selected_activity = activity_mapping[selected_activity_name]
+        
+        # Show activity details and registration form
+        activity_id = selected_activity['id']
+        activity_name = selected_activity['name']
+        activity_unit = selected_activity['unit']
+        activity_description = selected_activity['description']
+        is_company_specific = selected_activity.get('company_id') == user['company_id']
+        
+        # Show activity info
+        st.markdown(f"### {activity_name}")
+        if is_company_specific:
+            st.caption("🏢 Bedriftsspesifikk aktivitet")
         else:
-            # Only one activity - just show it
-            selected_activity_display = activity_options[0]
-            st.write(f"**🏃 Aktivitet:** {selected_activity_display}")
+            st.caption("🌐 Standard aktivitet")
         
-        # Get selected activity
-        selected_activity = activities_dict[selected_activity_display]
+        st.caption(activity_description)
         
-        if selected_activity:
-            activity_id = selected_activity['id']
-            activity_name = selected_activity['name']
-            activity_unit = selected_activity['unit']
-            activity_description = selected_activity['description']
-            is_company_specific = selected_activity.get('company_id') == user['company_id']
+        # Show scoring tiers
+        scoring_tiers = selected_activity['scoring_tiers']['tiers']
+        tier_text = " | ".join([
+            f"{tier['min']}-{tier.get('max', '∞')} {activity_unit} = {tier['points']}p"
+            for tier in scoring_tiers
+        ])
+        st.caption(f"🎯 **Poengskala:** {tier_text}")
+        
+        # Get current total if exists
+        current_total = 0.0
+        if activity_id in user_entries_dict:
+            current_total = float(user_entries_dict[activity_id]['value'])
+            current_points = db.calculate_points_for_activity(activity_id, current_total)
+            st.info(f"📈 **Nåværende total:** {current_total} {activity_unit} ({current_points} poeng)")
+        
+        # Registration form
+        with st.form("activity_registration_form", clear_on_submit=True):
+            st.markdown(f"**Legg til {activity_name}:**")
             
-            # Show selected activity details
-            with st.container():
-                header = f"### {activity_name}"
-                if is_company_specific:
-                    header += " 🏢"
-                st.markdown(header)
-                
-                if is_company_specific:
-                    st.caption("🏢 Bedriftsspesifikk aktivitet")
-                else:
-                    st.caption("🌐 Standard aktivitet")
-                
-                st.caption(activity_description)
-                
-                # Show scoring tiers
-                scoring_tiers = selected_activity['scoring_tiers']['tiers']
-                tier_text = " | ".join([
-                    f"{tier['min']}-{tier.get('max', '∞')} {activity_unit} = {tier['points']}p"
-                    for tier in scoring_tiers
-                ])
-                st.caption(f"🎯 **Poengskala:** {tier_text}")
-                
-                # Get current total if exists
-                current_total = 0.0
-                if activity_id in user_entries_dict:
-                    current_total = float(user_entries_dict[activity_id]['value'])
-                    current_points = db.calculate_points_for_activity(activity_id, current_total)
-                    st.info(f"📈 **Nåværende total:** {current_total} {activity_unit} ({current_points} poeng)")
-                
-                # Registration form for selected activity
-                with st.form("single_activity_form", clear_on_submit=True):
-                    st.markdown(f"**Legg til {activity_name}:**")
-                    
-                    new_value = st.number_input(
-                        f"Antall {activity_unit} å legge til",
-                        min_value=0.0,
-                        value=0.0,
-                        step=1.0 if activity_unit == 'k steps' else 0.1,
-                        key="single_activity_input",
-                        help=f"Hvor mye {activity_name.lower()} vil du legge til?"
-                    )
-                    
-                    # Submit button
-                    submitted = st.form_submit_button(
-                        f"➕ Legg til {activity_name}", 
-                        type="primary", 
-                        use_container_width=True
-                    )
-                
-                if submitted and new_value > 0:
-                    add_single_activity(user, competition, activity_id, new_value, current_total, db)
-                elif submitted and new_value == 0:
-                    st.warning("Skriv inn en verdi større enn 0")
+            new_value = st.number_input(
+                f"Antall {activity_unit} å legge til",
+                min_value=0.0,
+                value=0.0,
+                step=1.0 if activity_unit == 'k steps' else 0.1,
+                help=f"Hvor mye {activity_name.lower()} vil du legge til?"
+            )
+            
+            submitted = st.form_submit_button(
+                f"➕ Legg til {activity_name}", 
+                type="primary", 
+                use_container_width=True
+            )
         
-        # Only admin can edit existing values - removed from user interface
+        if submitted and new_value > 0:
+            add_single_activity(user, competition, activity_id, new_value, current_total, db)
+        elif submitted and new_value == 0:
+            st.warning("Skriv inn en verdi større enn 0")
         
     except Exception as e:
         st.error(f"Feil ved lasting av aktiviteter: {e}")
@@ -163,7 +141,7 @@ def add_single_activity(user, competition, activity_id, new_value, current_total
         # Calculate new total
         new_total = current_total + new_value
         
-        # Use our fixed upsert function
+        # Use upsert function
         entry = upsert_user_entry(
             user_id=user['id'],
             activity_id=activity_id,
@@ -179,43 +157,18 @@ def add_single_activity(user, competition, activity_id, new_value, current_total
         st.success(f"🎯 Ny total: {new_total} {activity_unit} ({entry['points']} poeng)")
         st.balloons()
         
-        # Auto refresh page to clear form and show updated data
         st.rerun()
         
     except Exception as e:
         st.error(f"Feil ved lagring: {e}")
 
 
-def update_activities(user, competition, activity_values, db):
-    """Update existing activity totals directly"""
-    try:
-        updated_count = 0
-        
-        for activity_id, new_total in activity_values.items():
-            entry = upsert_user_entry(
-                user_id=user['id'],
-                activity_id=activity_id,
-                competition_id=competition['id'],
-                value=new_total,
-                db=db
-            )
-            updated_count += 1
-        
-        if updated_count > 0:
-            st.success(f"✅ Oppdatert {updated_count} aktiviteter!")
-            st.rerun()
-            
-    except Exception as e:
-        st.error(f"Feil ved oppdatering: {e}")
-
-
 def upsert_user_entry(user_id: str, activity_id: str, competition_id: str, value: float, db):
-    """Safely insert or update user entry to avoid duplicate key constraint"""
+    """Safely insert or update user entry"""
     try:
         # Calculate points
         points = db.calculate_points_for_activity(activity_id, value)
         
-        # Try to update first
         supabase = get_supabase()
         
         # Check if entry exists
@@ -252,7 +205,7 @@ def show_current_registrations(user, competition, user_entries, db):
     if user_entries:
         total_points = 0
         
-        # Create a nice table view
+        # Create table view
         col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
         
         with col1:
@@ -300,7 +253,7 @@ def show_current_registrations(user, competition, user_entries, db):
         with col4:
             st.write("")
         
-        # Show ranking hint
+        # Show ranking
         try:
             leaderboard = db.get_leaderboard_for_competition(competition['id'])
             user_rank = None
@@ -317,8 +270,7 @@ def show_current_registrations(user, competition, user_entries, db):
         
     else:
         st.info("Du har ikke registrert noen aktiviteter ennå denne måneden")
-        st.markdown("👆 Bruk skjemaet over for å registrere dine aktiviteter!")
 
 
-# Import functions that are used from database_helpers
+# Import functions from database_helpers
 from utils.database_helpers import get_activity_name, get_activity_unit
