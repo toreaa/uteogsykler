@@ -88,10 +88,15 @@ def show_current_month_activities(user):
         
         # Show dropdown to select activity
         if len(activity_options) > 0:
+            st.markdown("**Velg aktivitet du vil registrere:**")
+            
+            # Force unique key and explicit index
             selected_activity_name = st.selectbox(
-                "Velg aktivitet:",
-                activity_options,
-                key="activity_selector"
+                label="Aktivitet",
+                options=activity_options,
+                index=0,
+                key=f"activity_selector_{len(activity_options)}",
+                help="Velg hvilken aktivitet du vil legge til data for"
             )
             
             # DEBUG: Show selected value
