@@ -36,8 +36,15 @@ def show_current_month_activities(user):
         month_name = current_month.strftime("%B %Y")
         st.info(f"📅 **Registrerer for:** {month_name}")
         
-        # Get available activities - ENDRET: Pass company_id for å få bedriftsspesifikke aktiviteter
+        # Get available activities - Pass company_id for å få bedriftsspesifikke aktiviteter
         activities = db.get_active_activities(company_id=user['company_id'])
+        
+        # DEBUG: Vis alle aktiviteter som er hentet
+        if st.checkbox("🔧 Vis debug-info for aktiviteter"):
+            st.write(f"**Antall aktiviteter funnet:** {len(activities)}")
+            for i, activity in enumerate(activities):
+                company_status = "🏢 Bedriftsspesifikk" if activity.get('company_id') == user['company_id'] else "🌐 Global"
+                st.write(f"{i+1}. **{activity['name']}** ({activity['unit']}) - {company_status}")
         
         if not activities:
             st.error("Ingen aktiviteter tilgjengelig")
@@ -61,12 +68,20 @@ def show_current_month_activities(user):
         st.subheader("➕ Legg til ny aktivitet")
         st.info("💡 **Tips:** Verdiene du legger inn blir **lagt til** dine eksisterende totaler for måneden")
         
-        # Categorize activities - NYTT: Vis globale vs bedriftsspesifikke
+        # Categorize activities - Vis globale vs bedriftsspesifikke
         global_activities = [a for a in activities if a.get('company_id') is None]
         company_activities = [a for a in activities if a.get('company_id') == user['company_id']]
         
-        # Activity selector dropdown with categories
-        activities_dict = {activity['id']: activity for activity in activities}
+        # DEBUG: Vis kategorisering
+        if st.checkbox("🔧 Vis kategorisering av aktiviteter"):
+            st.write(f"**Globale aktiviteter:** {len(global_activities)}")
+            for activity in global_activities:
+                st.write(f"  - {activity['name']} ({activity['unit']})")
+            st.write(f"**Bedriftsspesifikke aktiviteter:** {len(company_activities)}")
+            for activity in company_activities:
+                st.write(f"  - {activity['name']} ({activity['unit']}) 🏢")
+        
+        # Build activity options for dropdown
         activity_options = []
         
         # Add global activities
@@ -81,18 +96,35 @@ def show_current_month_activities(user):
             for activity in company_activities:
                 activity_options.append(f"{activity['name']} ({activity['unit']}) 🏢")
         
+        # DEBUG: Vis alle alternativer
+        if st.checkbox("🔧 Vis dropdown-alternativer"):
+            st.write(f"**Alle alternativer ({len(activity_options)}):**")
+            for i, option in enumerate(activity_options):
+                st.write(f"  {i+1}. {option}")
+        
         # Filter out category headers for selection
         selectable_options = [opt for opt in activity_options if not opt.startswith("---")]
         
+        # DEBUG: Vis valgbare alternativer
+        if st.checkbox("🔧 Vis valgbare alternativer"):
+            st.write(f"**Valgbare alternativer ({len(selectable_options)}):**")
+            for i, option in enumerate(selectable_options):
+                st.write(f"  {i+1}. {option}")
+        
         if not selectable_options:
-            st.error("Ingen aktiviteter tilgjengelig")
+            st.error("Ingen valgbare aktiviteter tilgjengelig")
+            st.error("🐛 **Debug:** Dette skulle ikke skje hvis aktiviteter finnes!")
             return
         
+        # Activity selector dropdown
         selected_activity_display = st.selectbox(
             "🏃 Velg aktivitet å registrere:",
             selectable_options,
             help="Velg hvilken aktivitet du vil legge til data for"
         )
+        
+        # DEBUG: Vis valgt aktivitet
+        st.write(f"🔍 **Valgt aktivitet:** {selected_activity_display}")
         
         # Find selected activity
         selected_activity = None
@@ -104,6 +136,18 @@ def show_current_month_activities(user):
             if activity_display == selected_activity_display:
                 selected_activity = activity
                 break
+        
+        # DEBUG: Vis funnet aktivitet
+        if selected_activity:
+            st.write(f"✅ **Aktivitet funnet:** {selected_activity['name']}")
+        else:
+            st.error(f"❌ **Aktivitet ikke funnet for:** {selected_activity_display}")
+            st.write("**Tilgjengelige aktiviteter for matching:**")
+            for activity in activities:
+                activity_display = f"{activity['name']} ({activity['unit']})"
+                if activity.get('company_id') == user['company_id']:
+                    activity_display += " 🏢"
+                st.write(f"  - {activity_display}")
         
         if selected_activity:
             activity_id = selected_activity['id']
@@ -199,6 +243,7 @@ def show_current_month_activities(user):
         
     except Exception as e:
         st.error(f"Feil ved lasting av aktiviteter: {e}")
+        st.exception(e)  # Show full error for debugging
 
 
 def add_single_activity(user, competition, activity_id, new_value, current_total, db):
