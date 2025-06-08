@@ -68,9 +68,11 @@ def show_current_month_activities(user):
             activity_mapping[display_name] = activity
         
         if len(activity_options) > 0:
-            # Activity selection dropdown
-            selected_activity_name = st.selectbox(
-                "Velg aktivitet du vil registrere:",
+            # Activity selection with radio buttons
+            st.markdown("**Velg aktivitet du vil registrere:**")
+            
+            selected_activity_name = st.radio(
+                label="Aktivitetstype:",
                 options=activity_options,
                 index=0,
                 help="Velg hvilken aktivitet du vil legge til data for"
