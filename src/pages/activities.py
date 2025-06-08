@@ -86,21 +86,30 @@ def show_current_month_activities(user):
         st.subheader("➕ Legg til ny aktivitet")
         st.info("💡 **Tips:** Verdiene du legger inn blir **lagt til** dine eksisterende totaler for måneden")
         
-        # Show dropdown to select activity
+        # Show dropdown to select activity - FORCE RENDER
         if len(activity_options) > 0:
             st.markdown("**Velg aktivitet du vil registrere:**")
             
-            # Force unique key and explicit index
-            selected_activity_name = st.selectbox(
-                label="Aktivitet",
+            # Clear any cached state
+            if 'force_refresh' not in st.session_state:
+                st.session_state.force_refresh = 0
+            
+            # Use radio buttons instead of selectbox as test
+            selected_activity_name = st.radio(
+                label="Velg aktivitet:",
                 options=activity_options,
                 index=0,
-                key=f"activity_selector_{len(activity_options)}",
+                key=f"activity_radio_{st.session_state.force_refresh}",
                 help="Velg hvilken aktivitet du vil legge til data for"
             )
             
             # DEBUG: Show selected value
-            st.write(f"🔍 **Valgt fra dropdown:** {selected_activity_name}")
+            st.write(f"🔍 **Valgt fra radio:** {selected_activity_name}")
+            
+            # Button to force refresh
+            if st.button("🔄 Refresh aktiviteter"):
+                st.session_state.force_refresh += 1
+                st.rerun()
             
             # Get the selected activity object
             if selected_activity_name in activity_mapping:
