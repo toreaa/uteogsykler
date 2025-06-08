@@ -34,8 +34,39 @@ def show_current_month_activities(user):
         month_name = current_month.strftime("%B %Y")
         st.info(f"📅 **Registrerer for:** {month_name}")
         
+        # =============== DEBUG SECTION ===============
+        st.write("🔍 **DEBUG INFORMASJON:**")
+        st.write(f"**User company_id:** {user['company_id']}")
+        
         # Get available activities
         activities = db.get_active_activities(company_id=user['company_id'])
+        
+        st.write(f"**Antall aktiviteter funnet:** {len(activities)}")
+        st.write("**Aktiviteter i databasen:**")
+        for i, activity in enumerate(activities):
+            st.write(f"  {i+1}. **{activity['name']}** ({activity['unit']}) - ID: {activity['id'][:8]}...")
+        
+        # Create dropdown options
+        activity_options = []
+        activity_mapping = {}
+        
+        for activity in activities:
+            display_name = f"{activity['name']} ({activity['unit']})"
+            if activity.get('company_id') == user['company_id']:
+                display_name += " 🏢"
+            
+            activity_options.append(display_name)
+            activity_mapping[display_name] = activity
+        
+        st.write(f"**Dropdown alternativer ({len(activity_options)}):**")
+        for i, option in enumerate(activity_options):
+            st.write(f"  {i+1}. {option}")
+        
+        st.write("**Activity mapping keys:**")
+        for key in activity_mapping.keys():
+            st.write(f"  - {key}")
+        st.markdown("---")
+        # =============== END DEBUG ===============
         
         if not activities:
             st.error("Ingen aktiviteter tilgjengelig")
@@ -55,27 +86,30 @@ def show_current_month_activities(user):
         st.subheader("➕ Legg til ny aktivitet")
         st.info("💡 **Tips:** Verdiene du legger inn blir **lagt til** dine eksisterende totaler for måneden")
         
-        # Create dropdown options
-        activity_options = []
-        activity_mapping = {}
-        
-        for activity in activities:
-            display_name = f"{activity['name']} ({activity['unit']})"
-            if activity.get('company_id') == user['company_id']:
-                display_name += " 🏢"
-            
-            activity_options.append(display_name)
-            activity_mapping[display_name] = activity
-        
         # Show dropdown to select activity
-        selected_activity_name = st.selectbox(
-            "Velg aktivitet:",
-            activity_options,
-            key="activity_selector"
-        )
-        
-        # Get the selected activity object
-        selected_activity = activity_mapping[selected_activity_name]
+        if len(activity_options) > 0:
+            selected_activity_name = st.selectbox(
+                "Velg aktivitet:",
+                activity_options,
+                key="activity_selector"
+            )
+            
+            # DEBUG: Show selected value
+            st.write(f"🔍 **Valgt fra dropdown:** {selected_activity_name}")
+            
+            # Get the selected activity object
+            if selected_activity_name in activity_mapping:
+                selected_activity = activity_mapping[selected_activity_name]
+                st.write(f"✅ **Aktivitet funnet i mapping:** {selected_activity['name']}")
+            else:
+                st.error(f"❌ **Aktivitet IKKE funnet i mapping:** {selected_activity_name}")
+                st.write("**Tilgjengelige keys:**")
+                for key in activity_mapping.keys():
+                    st.write(f"  - '{key}'")
+                return
+        else:
+            st.error("Ingen aktiviteter tilgjengelig for dropdown")
+            return
         
         # Show activity details and registration form
         activity_id = selected_activity['id']
@@ -133,6 +167,7 @@ def show_current_month_activities(user):
         
     except Exception as e:
         st.error(f"Feil ved lasting av aktiviteter: {e}")
+        st.exception(e)  # Show full error
 
 
 def add_single_activity(user, competition, activity_id, new_value, current_total, db):
