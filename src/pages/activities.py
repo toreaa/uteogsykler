@@ -11,7 +11,7 @@ import os
 # Add src to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.database_helpers import get_db_helper
+from utils.database_helpers import get_db_helper, get_activity_name, get_activity_unit
 from utils.supabase_client import get_supabase
 
 
@@ -34,39 +34,8 @@ def show_current_month_activities(user):
         month_name = current_month.strftime("%B %Y")
         st.info(f"📅 **Registrerer for:** {month_name}")
         
-        # =============== DEBUG SECTION ===============
-        st.write("🔍 **DEBUG INFORMASJON:**")
-        st.write(f"**User company_id:** {user['company_id']}")
-        
         # Get available activities
         activities = db.get_active_activities(company_id=user['company_id'])
-        
-        st.write(f"**Antall aktiviteter funnet:** {len(activities)}")
-        st.write("**Aktiviteter i databasen:**")
-        for i, activity in enumerate(activities):
-            st.write(f"  {i+1}. **{activity['name']}** ({activity['unit']}) - ID: {activity['id'][:8]}...")
-        
-        # Create dropdown options
-        activity_options = []
-        activity_mapping = {}
-        
-        for activity in activities:
-            display_name = f"{activity['name']} ({activity['unit']})"
-            if activity.get('company_id') == user['company_id']:
-                display_name += " 🏢"
-            
-            activity_options.append(display_name)
-            activity_mapping[display_name] = activity
-        
-        st.write(f"**Dropdown alternativer ({len(activity_options)}):**")
-        for i, option in enumerate(activity_options):
-            st.write(f"  {i+1}. {option}")
-        
-        st.write("**Activity mapping keys:**")
-        for key in activity_mapping.keys():
-            st.write(f"  - {key}")
-        st.markdown("---")
-        # =============== END DEBUG ===============
         
         if not activities:
             st.error("Ingen aktiviteter tilgjengelig")
@@ -86,43 +55,35 @@ def show_current_month_activities(user):
         st.subheader("➕ Legg til ny aktivitet")
         st.info("💡 **Tips:** Verdiene du legger inn blir **lagt til** dine eksisterende totaler for måneden")
         
-        # Show dropdown to select activity - FORCE RENDER
+        # Create dropdown options
+        activity_options = []
+        activity_mapping = {}
+        
+        for activity in activities:
+            display_name = f"{activity['name']} ({activity['unit']})"
+            if activity.get('company_id') == user['company_id']:
+                display_name += " 🏢"
+            
+            activity_options.append(display_name)
+            activity_mapping[display_name] = activity
+        
         if len(activity_options) > 0:
-            st.markdown("**Velg aktivitet du vil registrere:**")
-            
-            # Clear any cached state
-            if 'force_refresh' not in st.session_state:
-                st.session_state.force_refresh = 0
-            
-            # Use radio buttons instead of selectbox as test
-            selected_activity_name = st.radio(
-                label="Velg aktivitet:",
+            # Activity selection dropdown
+            selected_activity_name = st.selectbox(
+                "Velg aktivitet du vil registrere:",
                 options=activity_options,
                 index=0,
-                key=f"activity_radio_{st.session_state.force_refresh}",
                 help="Velg hvilken aktivitet du vil legge til data for"
             )
-            
-            # DEBUG: Show selected value
-            st.write(f"🔍 **Valgt fra radio:** {selected_activity_name}")
-            
-            # Button to force refresh
-            if st.button("🔄 Refresh aktiviteter"):
-                st.session_state.force_refresh += 1
-                st.rerun()
             
             # Get the selected activity object
             if selected_activity_name in activity_mapping:
                 selected_activity = activity_mapping[selected_activity_name]
-                st.write(f"✅ **Aktivitet funnet i mapping:** {selected_activity['name']}")
             else:
-                st.error(f"❌ **Aktivitet IKKE funnet i mapping:** {selected_activity_name}")
-                st.write("**Tilgjengelige keys:**")
-                for key in activity_mapping.keys():
-                    st.write(f"  - '{key}'")
+                st.error("Feil ved valg av aktivitet")
                 return
         else:
-            st.error("Ingen aktiviteter tilgjengelig for dropdown")
+            st.error("Ingen aktiviteter tilgjengelig")
             return
         
         # Show activity details and registration form
@@ -319,7 +280,3 @@ def show_current_registrations(user, competition, user_entries, db):
         
     else:
         st.info("Du har ikke registrert noen aktiviteter ennå denne måneden")
-
-
-# Import functions from database_helpers
-from utils.database_helpers import get_activity_name, get_activity_unit
